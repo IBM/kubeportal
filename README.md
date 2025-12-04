@@ -3,7 +3,8 @@ Kubeportal aims to be an end-to-end solution for secure, cross-cluster Kubernete
 It allows workloads in a central cluster to seamlessly interact with the Kubernetes APIs of multiple remote clusters without exposing those clusters publicly.  
 The kubeportal runs as a Deployment in Hub mode in the central cluster and as a Deployment in Agent mode in remote clusters.  
   
-![diagram](./diagram.png)
+<img width="830" height="553" alt="diagram" src="https://github.com/user-attachments/assets/1c409c85-8c7a-40b8-a058-bc7861cd7992" />
+
 
 ## ⚠️ Status
 kubeportal is an early prototype, still in active development.  
