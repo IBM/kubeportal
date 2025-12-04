@@ -1,0 +1,30 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: client
+  namespace: default
+  labels:
+    app: client
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: client
+  template:
+    metadata:
+      labels:
+        app: client
+    spec:
+      serviceAccountName: client
+      automountServiceAccountToken: true
+      containers:
+      - name: client
+        command: ["sleep"]
+        args: ["infinity"]
+        image: kp:local
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: client
+  namespace: default

@@ -1,0 +1,76 @@
+# allow kubeportal to impersonate testUser
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kubeportal-testUser
+rules:
+- apiGroups: [""]
+  resources: ["users"]
+  verbs: ["impersonate"]
+  resourceNames: ["kubeportal:testUser"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kubeportal-testUser
+subjects:
+- kind: ServiceAccount
+  name: agent
+  namespace: default
+roleRef:
+  kind: ClusterRole
+  name: kubeportal-testUser
+  apiGroup: rbac.authorization.k8s.io
+---
+
+# allow testUser to do someting in a namespace
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: example-pod-reading
+  namespace: default
+rules:
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: example-pod-reading
+  namespace: default
+roleRef:
+  kind: Role
+  name: example-pod-reading
+  apiGroup: rbac.authorization.k8s.io
+subjects:
+- kind: User
+  name: kubeportal:testUser
+  apiGroup: rbac.authorization.k8s.io
+---
+
+# allow testUser to do someting cluster-wide
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: example-service-reading
+rules:
+- apiGroups: [""]
+  resources: ["services"]
+  verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: example-service-reading
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: example-service-reading
+subjects:
+- kind: User
+  name: kubeportal:testUser
+  apiGroup: rbac.authorization.k8s.io

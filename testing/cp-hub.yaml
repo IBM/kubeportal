@@ -1,0 +1,58 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kp
+  namespace: default
+  labels:
+    app: kp
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kp
+  template:
+    metadata:
+      labels:
+        app: kp
+    spec:
+      containers:
+      - name: kp
+        args: ["hub"]
+        image: kp:local
+        env:
+        - name: AGENT_LISTEN_PORT
+          value: "443"
+        - name: CLIENT_LISTEN_PORT
+          value: "444"
+        ports:
+        - containerPort: 443
+        - containerPort: 444
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kp-external
+  namespace: default
+spec:
+  type: NodePort
+  selector:
+    app: kp
+  ports:
+    - port: 443
+      name: agents
+      targetPort: 443
+      nodePort: 31443
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kp-local
+  namespace: default
+spec:
+  type: ClusterIP
+  selector:
+    app: kp
+  ports:
+    - port: 444
+      name: clients
+      targetPort: 444

@@ -1,0 +1,43 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kp
+  namespace: default
+  labels:
+    app: kp
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kp
+  template:
+    metadata:
+      labels:
+        app: kp
+    spec:
+      serviceAccountName: agent
+      automountServiceAccountToken: true
+      containers:
+      - name: kp
+        args: ["agent"]
+        image: kp:local
+        env:
+        - name: HUB_URL
+          value: "http://172.19.0.3:31443"
+        volumeMounts:
+        - name: hub-token
+          mountPath: /var/run/secrets/tokens
+          readOnly: true
+      volumes:
+      - name: hub-token
+        projected:
+          sources:
+          - serviceAccountToken:
+              path: hub-token
+              audience: kubeportal
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: agent
+  namespace: default
