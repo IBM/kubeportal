@@ -15,29 +15,51 @@ spec:
       labels:
         app: kp
     spec:
-      serviceAccountName: agent
+      serviceAccountName: kubeportal-agent
       automountServiceAccountToken: true
       containers:
       - name: kp
         args: ["agent"]
         image: kp:local
         env:
-        - name: HUB_URL
-          value: "http://172.19.0.3:31443"
-        volumeMounts:
-        - name: hub-token
-          mountPath: /var/run/secrets/tokens
-          readOnly: true
-      volumes:
-      - name: hub-token
-        projected:
-          sources:
-          - serviceAccountToken:
-              path: hub-token
-              audience: kubeportal
+        - name: HUB_ADDRESS
+          value: "172.19.0.3:31443"
+        - name: INSECURE_HUB
+          value: "true"
 ---
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: agent
+  name: kubeportal-agent
+  namespace: default
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kubeportal-openid-reader
+  namespace: default
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: kubeportal-agent-create-token
+  namespace: default
+rules:
+- apiGroups: [""]
+  resources: ["serviceaccounts/token"]
+  resourceNames: ["kubeportal-openid-reader"]
+  verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: kubeportal-agent-create-token
+  namespace: default
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: kubeportal-agent-create-token
+subjects:
+- kind: ServiceAccount
+  name: kubeportal-agent
   namespace: default

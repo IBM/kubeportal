@@ -16,7 +16,7 @@ metadata:
   name: kubeportal-testUser
 subjects:
 - kind: ServiceAccount
-  name: agent
+  name: kubeportal-agent
   namespace: default
 roleRef:
   kind: ClusterRole
@@ -24,7 +24,7 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
 ---
 
-# allow testUser to do someting in a namespace
+# allow testUser to do something in a namespace
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
@@ -34,7 +34,7 @@ metadata:
 rules:
 - apiGroups: [""]
   resources: ["pods"]
-  verbs: ["get", "list"]
+  verbs: ["get", "list", "watch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -60,7 +60,7 @@ metadata:
 rules:
 - apiGroups: [""]
   resources: ["services"]
-  verbs: ["get", "list"]
+  verbs: ["get", "list", watch]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

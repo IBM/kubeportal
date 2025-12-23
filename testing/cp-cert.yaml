@@ -1,0 +1,26 @@
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: openid-certs
+  namespace: default
+data:
+  kube.id: |
+    -----BEGIN CERTIFICATE-----
+    MIIDBTCCAe2gAwIBAgIILNa3uAuqdG4wDQYJKoZIhvcNAQELBQAwFTETMBEGA1UE
+    AxMKa3ViZXJuZXRlczAeFw0yNTExMDQyMDA4MzVaFw0zNTExMDIyMDEzMzVaMBUx
+    EzARBgNVBAMTCmt1YmVybmV0ZXMwggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEK
+    AoIBAQDv/2H2Vqcsu3YHL8Gne7Ms84qGSnLPR3/z5GxzIFDJ4woqf4n4AfvqOutJ
+    a9E6HWT24vXp859fK4xDtLmuPfMzwzgzetYuNbcWikJrKjsiEzHet2t0UWvczi3c
+    qKPAzkzdv1BgJBMa57eTQvrzfD5iZXFMBqxTyTCv0Zr9OECzHpuZ+yhupxzsYSnv
+    Sn8GAs99+Q1LVxQTBbata97TatdhTTtRXK0NTI+sMcKDgmsxMrQqoUUJnlu3JiJp
+    YPejT3kUoTgWO0pM/W0SuYsNBfMT3TlNiRBqUGAjGE9hc6fTkny9l2OQWpq2Wghp
+    tz8LazsYAjPbOnPp6lv3IxZRBjTLAgMBAAGjWTBXMA4GA1UdDwEB/wQEAwICpDAP
+    BgNVHRMBAf8EBTADAQH/MB0GA1UdDgQWBBT8Mfccs2Tmv59+W2kTrLhjZgm5GjAV
+    BgNVHREEDjAMggprdWJlcm5ldGVzMA0GCSqGSIb3DQEBCwUAA4IBAQBQ5muDI+Pb
+    Ost3ssaKocXgXH5H0zlSce3e3axkTn2u90Nacte3e+hB7v/rXl2L0RGqaTWHMRSF
+    tGdiMGbF301wLIxtJR4qwl8NCdp0RAIjHWqqX3se7UTSji6bezRSK73iV5rkMZJC
+    xgQdKu/HPnxwoamgskv/+yX/JRTBac/XiZEVEMXZzASvZHyCnOWItudx3Yr+afGj
+    kQSZ1ZfIXMvjnwbXjh85HYzY6hHsSDf0UVThuFydBimYMH1btq1fy9xdZTfw4sqk
+    VaCJXodUrPNXWP/YCJ9ifdLgSUA6KXIWr4rqdQA/TFDVmFTJrm7LQ/S9J/gjcC6D
+    97IpLx7bImtg
+    -----END CERTIFICATE-----

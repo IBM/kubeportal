@@ -2,146 +2,168 @@ package agent
 
 import (
 	"context"
-	"crypto/tls"
+	"errors"
 	"kubeportal/messaging"
+	"kubeportal/shared"
 	"log/slog"
 	"net"
-	"net/url"
+	"os"
 	"time"
+
+	"github.com/google/uuid"
+	authv1 "k8s.io/api/authentication/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
+	v1 "k8s.io/client-go/kubernetes/typed/core/v1"
+	"k8s.io/client-go/rest"
 )
 
 const (
 	maxConsecutiveRejections = 10
 	maxSleepTime             = 5 * time.Second
 	unitOfSleep              = maxSleepTime / maxConsecutiveRejections
+	openidTokenTTL           = 10 * time.Minute
 )
 
 type Agent struct {
-	hubURL         url.URL
-	kubeIdentifier string
-	k8sProxy       *K8sProxy
-	log            *slog.Logger
-	ctx            context.Context
+	id                 string
+	hubAddress         string
+	insecureHub        bool
+	kubeIdentifier     string
+	k8sProxy           *K8sProxy
+	log                *slog.Logger
+	ctx                context.Context
+	openidToken        shared.AtomicValue[string]
+	openidTokenFetcher v1.ServiceAccountInterface
+	openidTokenRequest *authv1.TokenRequest
 }
 
-func NewAgent(ctx context.Context, k8sProxy *K8sProxy, kubeIdentifier string, hubURL url.URL) *Agent {
-	return &Agent{
-		k8sProxy:       k8sProxy,
-		hubURL:         hubURL,
-		kubeIdentifier: kubeIdentifier,
-		log:            slog.With("module", "Agent"),
-		ctx:            ctx,
+func NewAgent(ctx context.Context, k8sProxy *K8sProxy, kubeIdentifier string, hubAddress string, insecureHub bool) (*Agent, error) {
+	cfg, err := rest.InClusterConfig()
+	if err != nil {
+		return nil, err
 	}
+	clientset, err := kubernetes.NewForConfig(cfg)
+	if err != nil {
+		return nil, err
+	}
+	ns, err := currentNamespace()
+	if err != nil {
+		return nil, err
+	}
+	podName, err := os.Hostname()
+	if err != nil {
+		return nil, err
+	}
+	ttl := int64(openidTokenTTL.Seconds())
+	a := &Agent{
+		id:                 podName,
+		k8sProxy:           k8sProxy,
+		hubAddress:         hubAddress,
+		insecureHub:        insecureHub,
+		kubeIdentifier:     kubeIdentifier,
+		log:                slog.With("module", "agent"),
+		ctx:                ctx,
+		openidTokenFetcher: clientset.CoreV1().ServiceAccounts(ns),
+		openidTokenRequest: &authv1.TokenRequest{
+			Spec: authv1.TokenRequestSpec{
+				ExpirationSeconds: &ttl,
+			},
+		},
+	}
+	if err := a.refreshOpenidToken(); err != nil {
+		return nil, err
+	}
+	return a, nil
 }
 
 func (a *Agent) Run() {
+	// refresh openid token periodically
+	go func() {
+		for range time.NewTicker(time.Minute).C {
+			if err := a.refreshOpenidToken(); err != nil {
+				a.log.Error("Failed to refresh openid token, will try again soon", "error", err)
+			}
+		}
+	}()
 	consecutiveRejections := 0
-	for a.ctx.Err() == nil {
-		if consecutiveRejections > 0 {
-			time.Sleep(unitOfSleep * time.Duration(min(consecutiveRejections, maxConsecutiveRejections)))
-		}
-		c, err := a.dialHub()
-		if err != nil {
-			a.log.With("error", err).Error("couldn't connect to hub")
-			consecutiveRejections++
-			continue
-		}
-		msg, err := a.initConn(c)
-		if err != nil {
-			c.Close()
-			a.log.With("error", err).Error("Error during conn init")
-			continue
-		}
-		switch msg {
-		case messaging.MsgConnAccepted:
-			consecutiveRejections = 0
-			go a.standbyConn(c)
-		case messaging.MsgConnRejected:
-			c.Close()
-			consecutiveRejections++
-		case messaging.MsgVerifyConn:
-			consecutiveRejections = 0
-			c.Close()
+	for {
+		select {
+		case <-a.ctx.Done():
+			a.log.Info("Shutting down")
+			return
+		case <-time.After(unitOfSleep * time.Duration(min(consecutiveRejections, maxConsecutiveRejections))):
+			c, err := a.dialHub()
+			if err != nil {
+				a.log.Error("couldn't connect to hub", "error", err)
+				consecutiveRejections++
+				continue
+			}
+			connID := uuid.NewString()
+			log := a.log.With("conn_id", connID)
+			tcpConn := c.(*net.TCPConn)
+			c = tracedConn{Conn: c, ID: connID}
+			msg, err := messaging.WriteAndExpect(c, messaging.MsgConnInfo{
+				KubeIdentifier: a.kubeIdentifier,
+				AgentID:        a.id,
+				SvcActToken:    a.openidToken.Load(),
+				ConnectionID:   connID,
+			}, messaging.MsgConnAccepted, messaging.MsgConnRejected, messaging.MsgVerifyConn)
+			if err != nil {
+				c.Close()
+				log.Error("Error during conn init", "error", err)
+				consecutiveRejections++
+				continue
+			}
+			switch msg {
+			case messaging.MsgConnAccepted:
+				consecutiveRejections = 0
+				log.Info("Serving conn")
+				go a.k8sProxy.ServeConn(c)
+			case messaging.MsgConnRejected:
+				c.Close()
+				consecutiveRejections++
+			case messaging.MsgVerifyConn:
+				if err := a.doConnVerification(tcpConn); err != nil {
+					log.Error("Error during conn verification", "error", err)
+					consecutiveRejections++
+				} else {
+					consecutiveRejections = 0
+				}
+				c.Close()
+			}
 		}
 	}
 }
 
-func (a *Agent) initConn(c net.Conn) (messaging.Message, error) {
-	if err := messaging.Write(c, messaging.ConnInfo{
-		KubeIdentifier: a.kubeIdentifier,
-		SvcActToken:    "todo", // use aud
-		ConnectionID:   "todo",
-	}); err != nil {
-		return messaging.MsgNone, err
-	}
-	msg, err := messaging.Expect(c, messaging.MsgConnAccepted, messaging.MsgConnRejected, messaging.MsgVerifyConn)
+func (a *Agent) doConnVerification(c *net.TCPConn) error {
+	k8sConn, err := tcpDialer.DialContext(a.ctx, "tcp", shared.K8sHostname+":443")
 	if err != nil {
-		return messaging.MsgNone, err
+		return err
 	}
-	if msg == messaging.MsgVerifyConn {
-		if err := messaging.Write(c, messaging.MsgConnVerificationReady); err != nil {
-			return msg, err
-		}
+	defer k8sConn.Close()
+	if err := messaging.Write(c, messaging.MsgConnVerificationReady); err != nil {
+		return err
 	}
-	return msg, nil
-}
-
-func (a *Agent) standbyConn(c net.Conn) {
-	a.log.Debug("Conn to hub established, entering standby")
-	for a.ctx.Err() == nil {
-		msg, err := messaging.Expect(c, messaging.MsgActivateConn, messaging.MsgPing)
-		if err != nil {
-			a.log.With("error", err).Error("Error while waiting for conn activation")
-			c.Close()
-			return
-		}
-		if a.ctx.Err() != nil {
-			c.Close()
-			return
-		}
-		switch msg {
-		case messaging.MsgActivateConn:
-			a.log.Debug("activate")
-			if err := messaging.Write(c, messaging.MsgConnActivated); err != nil {
-				a.log.With("error", err).Error("Error confirming conn activation")
-				c.Close()
-				return
-			}
-			a.k8sProxy.ProxyConn(c)
-			return
-		case messaging.MsgPing:
-			a.log.Debug("ping")
-			if err := messaging.Write(c, messaging.MsgPong); err != nil {
-				a.log.With("error", err).Error("Error while ponging hub")
-				c.Close()
-				return
-			}
-		}
-	}
-}
-
-var tcpDialer = net.Dialer{
-	Timeout:   5 * time.Second,
-	KeepAlive: 30 * time.Second,
-}
-
-var tlsDialer = tls.Dialer{
-	NetDialer: &tcpDialer,
+	errChan := make(chan error)
+	c.SetDeadline(time.Now().Add(5 * time.Second))
+	go netCopy(k8sConn.(*net.TCPConn), c, errChan)
+	go netCopy(c, k8sConn.(*net.TCPConn), errChan)
+	return errors.Join(<-errChan, <-errChan)
 }
 
 func (a *Agent) dialHub() (net.Conn, error) {
-	u := a.hubURL
-	useTLS := u.Scheme == "https" || u.Scheme == "tls"
-	hostPort := u.Host
-	if u.Port() == "" {
-		if useTLS {
-			hostPort = u.Hostname() + ":443"
-		} else {
-			hostPort = u.Hostname() + ":80"
-		}
+	if a.insecureHub {
+		return tcpDialer.DialContext(a.ctx, "tcp", a.hubAddress)
 	}
-	if useTLS {
-		return tlsDialer.DialContext(a.ctx, "tcp", hostPort)
+	return tlsDialer.DialContext(a.ctx, "tcp", a.hubAddress)
+}
+
+func (a *Agent) refreshOpenidToken() error {
+	resp, err := a.openidTokenFetcher.CreateToken(a.ctx, shared.OpenidReaderSAName, a.openidTokenRequest, metav1.CreateOptions{})
+	if err != nil {
+		return err
 	}
-	return tcpDialer.DialContext(a.ctx, "tcp", hostPort)
+	a.openidToken.Store(resp.Status.Token)
+	return nil
 }

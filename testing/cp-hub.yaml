@@ -15,6 +15,13 @@ spec:
       labels:
         app: kp
     spec:
+      serviceAccountName: kubeportal-hub
+      automountServiceAccountToken: true
+      volumes:
+      - name: openid-certs
+        configMap:
+          name: openid-certs
+          optional: true
       containers:
       - name: kp
         args: ["hub"]
@@ -27,6 +34,9 @@ spec:
         ports:
         - containerPort: 443
         - containerPort: 444
+        volumeMounts:
+        - name: openid-certs
+          mountPath: /tmp/certs
 ---
 apiVersion: v1
 kind: Service
@@ -56,3 +66,9 @@ spec:
     - port: 444
       name: clients
       targetPort: 444
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kubeportal-hub
+  namespace: default

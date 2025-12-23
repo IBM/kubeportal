@@ -3,6 +3,7 @@ package messaging
 import (
 	"encoding/gob"
 	"fmt"
+	"io"
 	"net"
 	"slices"
 	"time"
@@ -12,18 +13,15 @@ type Message int
 
 const (
 	MsgNone Message = iota
-	MsgPing
-	MsgPong
 	MsgConnAccepted
-	MsgConnRejected // queue full
-	MsgActivateConn
-	MsgConnActivated
+	MsgConnRejected
 	MsgVerifyConn
 	MsgConnVerificationReady
 )
 
-type ConnInfo struct {
+type MsgConnInfo struct {
 	KubeIdentifier string
+	AgentID        string
 	SvcActToken    string
 	ConnectionID   string
 }
@@ -33,25 +31,16 @@ func Write(c net.Conn, payload any) error {
 		return err
 	}
 	defer c.SetWriteDeadline(time.Time{})
-	enc := gob.NewEncoder(c)
-	if err := enc.Encode(payload); err != nil {
-		return err
-	}
-	return nil
+	return gob.NewEncoder(c).Encode(payload)
 }
 
 func Expect(c net.Conn, expectedMsgs ...Message) (Message, error) {
 	var msg Message
-	defer c.SetReadDeadline(time.Time{})
-
-	deadline := time.Now().Add(5 * time.Second)
-	if slices.Contains(expectedMsgs, MsgActivateConn) {
-		deadline = time.Now().Add(2 * time.Hour)
-	}
-	if err := c.SetReadDeadline(deadline); err != nil {
+	if err := c.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
 		return msg, err
 	}
-	if err := gob.NewDecoder(c).Decode(&msg); err != nil {
+	defer c.SetReadDeadline(time.Time{})
+	if err := gob.NewDecoder(&unbufferedReader{c}).Decode(&msg); err != nil {
 		return msg, err
 	}
 	if !slices.Contains(expectedMsgs, msg) {
@@ -60,15 +49,34 @@ func Expect(c net.Conn, expectedMsgs ...Message) (Message, error) {
 	return msg, nil
 }
 
-func ReadConnInfo(c net.Conn) (ConnInfo, error) {
-	var info ConnInfo
+func WriteAndExpect(c net.Conn, payload any, expectedMsgs ...Message) (Message, error) {
+	if err := Write(c, payload); err != nil {
+		return MsgNone, err
+	}
+	return Expect(c, expectedMsgs...)
+}
+
+func ReadConnInfo(c net.Conn) (MsgConnInfo, error) {
+	var info MsgConnInfo
 	if err := c.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
 		return info, err
 	}
 	defer c.SetReadDeadline(time.Time{})
-	dec := gob.NewDecoder(c)
-	if err := dec.Decode(&info); err != nil {
+	if err := gob.NewDecoder(&unbufferedReader{c}).Decode(&info); err != nil {
 		return info, err
 	}
 	return info, nil
+}
+
+// implementing this interface prevents gob.NewDecoder from creating a private buffer
+var _ io.ByteReader = (*unbufferedReader)(nil)
+
+type unbufferedReader struct {
+	net.Conn
+}
+
+func (ur *unbufferedReader) ReadByte() (byte, error) {
+	buf := make([]byte, 1)
+	_, err := io.ReadFull(ur, buf)
+	return buf[0], err
 }

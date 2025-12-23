@@ -1,47 +1,44 @@
 package hub
 
 import (
-	"context"
+	"crypto/tls"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"kubeportal/messaging"
+	"kubeportal/shared"
 	"log/slog"
 	"net"
-	"strings"
-	"sync"
+	"net/http"
+	"net/url"
 	"time"
-
-	"github.com/golang-jwt/jwt/v5"
 )
 
-const timeToWaitForConnSlot = 50 * time.Millisecond
+const (
+	openidConfigPath = "/.well-known/openid-configuration"
+)
 
 type AgentManager struct {
-	ctx                 context.Context
-	log                 *slog.Logger
-	ln                  net.Listener
-	agentConns          sync.Map
-	tokenParser         *jwt.Parser
-	standbyConnsPerKube int
+	log         *slog.Logger
+	ln          net.Listener
+	kubeManager *KubeManager
 }
 
-func NewAgentManager(ctx context.Context, ln net.Listener, standbyConnsPerKube int) *AgentManager {
+func NewAgentManager(ln net.Listener, km *KubeManager) *AgentManager {
 	am := &AgentManager{
-		ctx:                 ctx,
-		log:                 slog.With("module", "HubAgentManager"),
-		ln:                  ln,
-		agentConns:          sync.Map{},
-		tokenParser:         jwt.NewParser(jwt.WithoutClaimsValidation()),
-		standbyConnsPerKube: standbyConnsPerKube,
+		log:         slog.With("module", "hub-agent-manager"),
+		ln:          ln,
+		kubeManager: km,
 	}
 	return am
 }
 
-func (am *AgentManager) Serve() {
+func (am *AgentManager) Run() {
 	am.log.Info("Agent manager listening")
 	for {
 		conn, err := am.ln.Accept()
 		if err != nil {
-			am.log.With("error", err).Error("accept error")
+			am.log.Error("accept error", "error", err)
 			continue
 		}
 		go am.HandleIncomingConn(conn)
@@ -52,102 +49,117 @@ func (am *AgentManager) HandleIncomingConn(c net.Conn) {
 	log := am.log.With("addr", c.RemoteAddr().String())
 	connInfo, err := messaging.ReadConnInfo(c)
 	if err != nil {
-		log.With("error", err).Error("Failed reading conn info from agent")
+		log.Error("Failed reading conn info from agent", "error", err)
 		c.Close()
 		return
 	}
-	log = log.With("kubeIdentifier", connInfo.KubeIdentifier).With("connID", connInfo.ConnectionID)
-	log.Info("New conn from agent")
-	sc := am.getKubeStandbyConns(connInfo.KubeIdentifier)
-	deadlineCtx, cancel := context.WithTimeout(context.Background(), timeToWaitForConnSlot) // survive a few sc loops
-	defer cancel()
-	select {
-	case <-sc.ReserveSlot:
-		if err := setupConn(c); err != nil {
-			<-sc.ReleaseSlot
-			log.With("error", err).Error("Failed to setup new conn from agent")
-		} else {
-			sc.FillSlot <- &TracedConn{Conn: c, ID: connInfo.ConnectionID}
-			log.Info("Added agent conn for kube")
+	log = log.With("kube_identifier", connInfo.KubeIdentifier, "conn_id", connInfo.ConnectionID, "agent_id", connInfo.AgentID)
+
+	kube, err := am.kubeManager.GetKube(connInfo.KubeIdentifier)
+	if err != nil {
+		log.Error("Unknown kube", "error", err)
+		c.Close()
+		return
+	}
+
+	if err := kube.ValidateToken(connInfo.SvcActToken); err != nil {
+		if !errors.Is(err, ErrNoJWKS) {
+			log.Warn("Failed to validate agent token, will try fetching new jwks", "error", err)
 		}
-	case <-deadlineCtx.Done():
-		log.Debug("Standby conns full, closing conn")
-		if err := messaging.Write(c, messaging.MsgConnRejected); err != nil {
-			log.With("error", err).Error("Failed to send conn rejection to agent")
+		if !kube.CanFetchJWKS() {
+			log.Debug("Can't fetch jwks due to rate limiting, probably fetched by another agent conn in parallel")
+			c.Close()
+			return
+		}
+		log.Info("Fetching new jwks for kube")
+		jwksBytes, err := am.fetchJWKS(c, kube, connInfo.SvcActToken)
+		if err != nil {
+			log.Error("Failed to fetch jwks for kube", "error", err)
+			c.Close()
+			return
+		}
+		if err := am.kubeManager.SetJWKS(kube, jwksBytes); err != nil {
+			log.Error("Failed to set jwks for kube", "error", err)
+			c.Close()
+			return
 		}
 		c.Close()
+		return
 	}
-}
-
-func (am *AgentManager) GetConnForHost(ctx context.Context, network string, kubeIdentifier string) (net.Conn, error) {
-	kubeIdentifier, _, _ = strings.Cut(kubeIdentifier, ":") // remove port if present
-	log := am.log.With("kubeIdentifier", kubeIdentifier)
-	log.Debug("Connection requested")
-
-	sc := am.getKubeStandbyConns(kubeIdentifier)
-
-	// Try to get a valid connection, with retries for dead connections
-	deadlineCtx, cancel := context.WithTimeout(context.Background(), 25*time.Second) // kubectl seems to have ~30s default t/o
-	start := time.Now()
-	defer cancel()
-	for {
-		select {
-		case <-deadlineCtx.Done():
-			err := errors.New("hit deadline while waiting for a connection for the kube")
-			log.Warn(err.Error())
-			return nil, err
-		case <-ctx.Done():
-			err := errors.New("context cancelled while waiting for a connection for the kube")
-			log.With("error", ctx.Err()).Warn(err.Error())
-			return nil, err
-		case conn := <-sc.GetConn:
-			log := log.With("connID", conn.(*TracedConn).ID)
-			if err := messaging.Write(conn, messaging.MsgActivateConn); err != nil {
-				log.With("error", err).Warn("Failed while requesting to activate agent connection, discarding")
-				conn.Close()
-				continue
-			}
-			if _, err := messaging.Expect(conn, messaging.MsgConnActivated); err != nil {
-				log.With("error", err).Warn("Failed while confirming agent connection activation, discarding")
-				conn.Close()
-				continue
-			}
-			elapsed := time.Since(start)
-			durationLog := log.With("duration", elapsed.Milliseconds())
-			if elapsed > (time.Second * 5) {
-				durationLog.Warn("Took a long time to get a connection for a kube")
-			} else if elapsed > time.Second {
-				durationLog.Info("Took a while to get a connection for a kube")
-			}
-			durationLog.Debug("Successfully activated a connection for kube")
-			return conn, nil
+	if !kube.ShouldAddAgentConn(connInfo.AgentID) { // each agent sends one conn request at a time
+		if err := messaging.Write(c, messaging.MsgConnRejected); err != nil {
+			log.Error("Failed to send conn rejection to agent", "error", err)
 		}
+		c.Close()
+		return
 	}
-}
-
-func (am *AgentManager) getKubeStandbyConns(kubeIdentifier string) *StandbyConnStore {
-	conns, loaded := am.agentConns.Load(kubeIdentifier)
-	if !loaded {
-		conns, loaded = am.agentConns.LoadOrStore(kubeIdentifier, NewStandbyConnStore(am.standbyConnsPerKube))
-		if !loaded {
-			am.log.With("kubeIdentifier", kubeIdentifier).Info("New kube")
-			conns.(*StandbyConnStore).Run(kubeIdentifier)
-		}
-	}
-	return conns.(*StandbyConnStore)
-}
-
-func setupConn(c net.Conn) error {
 	if err := messaging.Write(c, messaging.MsgConnAccepted); err != nil {
-		return err
+		log.Error("Failed to accept new conn from agent", "error", err)
+		c.Close()
+		return
 	}
-	if c, ok := c.(*net.TCPConn); ok {
-		if err := c.SetKeepAlive(true); err != nil {
-			return err
-		}
-		if err := c.SetKeepAlivePeriod(time.Second * 30); err != nil {
-			return err
-		}
+	log.Info("Accepted new conn from agent, adding it to pool")
+	if err := kube.AddAgentConn(c, connInfo.AgentID, connInfo.ConnectionID); err != nil {
+		log.Error("Failed to add agent conn to pool", "error", err)
+		c.Close()
+		return
 	}
-	return nil
+}
+
+func (am *AgentManager) fetchJWKS(conn net.Conn, kube *Kube, svcActToken string) ([]byte, error) {
+	if _, err := messaging.WriteAndExpect(conn, messaging.MsgVerifyConn, messaging.MsgConnVerificationReady); err != nil {
+		return nil, err
+	}
+	tlsConn := tls.Client(conn, &tls.Config{
+		RootCAs:    kube.CaPool,
+		ServerName: shared.K8sHostname,
+	})
+	if err := tlsConn.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		return nil, err
+	}
+	if err := tlsConn.Handshake(); err != nil {
+		return nil, err
+	}
+	defer tlsConn.Close()
+	body, err := getOpenidPrivate(tlsConn, openidConfigPath, svcActToken)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch private openid configuration: %w", err)
+	}
+	var openidResp openidResponse
+	if err := json.Unmarshal(body, &openidResp); err != nil {
+		return nil, fmt.Errorf("failed to parse private openid configuration: %w", err)
+	}
+	issuerUrl, err := url.Parse(openidResp.Issuer)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse issuer url: %w", err)
+	}
+	if issuerUrl.Hostname() == shared.K8sHostname { // the kube is itself the issuer
+		jwksUri, err := url.Parse(openidResp.JwksUri)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse private jwks uri: %w", err)
+		}
+		return getOpenidPrivate(tlsConn, jwksUri.Path, svcActToken)
+	}
+	// external issuer
+	client := &http.Client{
+		Timeout: 5 * time.Second,
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{
+				RootCAs: kube.CaPoolWithRoots,
+			},
+		},
+	}
+	body, err = getOpenidPublic(client, openidResp.Issuer+openidConfigPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch public openid configuration: %w", err)
+	}
+	var pubOpenidResp openidResponse
+	if err := json.Unmarshal(body, &pubOpenidResp); err != nil {
+		return nil, fmt.Errorf("failed to parse public openid configuration: %w", err)
+	}
+	body, err = getOpenidPublic(client, pubOpenidResp.JwksUri)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get public jwks: %w", err)
+	}
+	return body, nil
 }
