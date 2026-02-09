@@ -3,17 +3,14 @@ package hub
 import (
 	"context"
 	"crypto/tls"
-	"errors"
 	"fmt"
-	"io"
 	"kubeportal/shared"
 	"log/slog"
-	"maps"
 	"net"
 	"net/http"
 	"net/http/httputil"
-	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -32,6 +29,7 @@ var (
 type ClientManager struct {
 	s  *http.Server
 	tr *http2.Transport
+	wg *sync.WaitGroup
 }
 
 func NewClientManager(ctx context.Context) (*ClientManager, *http2.Transport, error) {
@@ -47,14 +45,15 @@ func NewClientManager(ctx context.Context) (*ClientManager, *http2.Transport, er
 	}
 	rp := &httputil.ReverseProxy{
 		Transport: &shared.LoggingTripper{
-			RoundTripper: tr,
-			LogRequest:   LogRequest,
+			RoundTripper: &upgradeTransport{tr},
+			LogHeaders:   LogRequest,
 		},
 		Rewrite:      func(pr *httputil.ProxyRequest) {}, // done in ServeHTTP
 		ErrorHandler: shared.ProcessProxyError,
 		ErrorLog:     slog.NewLogLogger(slog.Default().With("module", "hub-proxy").Handler(), slog.LevelError),
 	}
-	ch, err := newClientHandler(ctx, rp)
+	wg := &sync.WaitGroup{}
+	ch, err := newClientHandler(ctx, rp, wg)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -76,6 +75,7 @@ func NewClientManager(ctx context.Context) (*ClientManager, *http2.Transport, er
 	return &ClientManager{
 		s:  clientSrv,
 		tr: tr,
+		wg: wg,
 	}, tr, nil
 }
 
@@ -91,6 +91,7 @@ func (cm *ClientManager) Run(ln net.Listener, listenerCrt, listenerKey string) {
 
 func (cm *ClientManager) Shutdown() {
 	cm.s.Shutdown(context.Background())
+	cm.wg.Wait()
 }
 
 type ClientHandler struct {
@@ -99,9 +100,10 @@ type ClientHandler struct {
 	log           *slog.Logger
 	tokenParser   *jwt.Parser
 	k8sAuthClient kubernetes.Interface
+	wg            *sync.WaitGroup
 }
 
-func newClientHandler(ctx context.Context, rp *httputil.ReverseProxy) (*ClientHandler, error) {
+func newClientHandler(ctx context.Context, rp *httputil.ReverseProxy, wg *sync.WaitGroup) (*ClientHandler, error) {
 	config, err := rest.InClusterConfig()
 	if err != nil {
 		return nil, err
@@ -118,6 +120,7 @@ func newClientHandler(ctx context.Context, rp *httputil.ReverseProxy) (*ClientHa
 		log:           slog.With("module", "hub-client-handler"),
 		tokenParser:   jwt.NewParser(jwt.WithoutClaimsValidation()),
 		k8sAuthClient: k8sClient,
+		wg:            wg,
 	}, nil
 }
 
@@ -153,7 +156,9 @@ func (ch *ClientHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// set up the request for forwarding to agent
 	r.Header.Set(shared.RequestIDHeaderName, uuid.NewString())
-	rCtx := context.WithValue(shared.CtxWithStartTime(r.Context()), ctxKeyRequestProps, &RequestProps{
+	rCtx := shared.CtxWithStartTime(r.Context())
+	rCtx = shared.CtxWithResponseLogItems(rCtx)
+	rCtx = context.WithValue(rCtx, ctxKeyRequestProps, &RequestProps{
 		KubeIdentifier: kubeIdentifier,
 		VirtualUser:    virtualUser,
 		ApiPath:        requestedPath,
@@ -163,9 +168,23 @@ func (ch *ClientHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	})
 	if shared.IsLongPollRequest(r) { // don't wait for watches when terminating
 		var cancel context.CancelFunc
-		rCtx, cancel = shared.CtxWithExistingCancel(rCtx, ch.ctx)
+		rCtx, cancel = context.WithCancel(rCtx)
 		defer cancel()
-		defer shared.NoAbortOnShutdown(ch.ctx)
+		stop := context.AfterFunc(ch.ctx, cancel)
+		defer stop()
+		defer shared.CatchAbortOnShutdown(ch.ctx)
+	}
+	if shared.IsUpgradeRequest(r) {
+		ch.wg.Add(1)
+		defer ch.wg.Done()
+		var cancel context.CancelFunc
+		rCtx, cancel = context.WithCancel(rCtx)
+		defer cancel()
+		stop := context.AfterFunc(ch.ctx, func() {
+			time.Sleep(time.Until(shared.StartTimeFromCtx(rCtx).Add(10 * time.Second)))
+			cancel()
+		})
+		defer stop()
 	}
 	r = r.WithContext(rCtx)
 	r.URL.Scheme = "http"
@@ -173,12 +192,8 @@ func (ch *ClientHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	r.URL.Path = requestedPath
 	r.Header.Set("Impersonate-User", shared.VirtualUserPrefix+virtualUser)
 	r.Header.Del("Authorization")
-
 	defer DecrementReqCnt(r)
-	if shared.IsUpgradeRequest(r) {
-		ch.serveUpgrade(w, r)
-		return
-	}
+	defer shared.LogRequestFinished(r, LogRequest)
 	ch.rp.ServeHTTP(w, r)
 }
 
@@ -222,70 +237,4 @@ func (ch *ClientHandler) respondError(w http.ResponseWriter, r *http.Request, co
 		"method", r.Method,
 		"path", r.URL.Path,
 	).Warn(fmt.Sprintf("Request error: %d %s", code, msg))
-}
-
-func (ch *ClientHandler) serveUpgrade(w http.ResponseWriter, r *http.Request) {
-	// modify and forward the request
-	proto := r.Header.Get("Upgrade")
-	r.Header.Set("Kubeportal-Upgrade", proto)
-	r.Header.Del("Upgrade")
-	r.Header.Del("Connection")
-	pr, pw := io.Pipe()
-	defer pw.Close()
-	r.Body = pr
-	resp, err := ch.rp.Transport.RoundTrip(r)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadGateway)
-		LogRequest(r, slog.LevelError, http.StatusBadGateway, err)
-		return
-	}
-	defer resp.Body.Close()
-
-	// proxy resp back to client
-	headers := w.Header()
-	maps.Copy(headers, resp.Header)
-	if resp.StatusCode != http.StatusOK {
-		errStr := fmt.Sprintf("unexpected status code from agent: %d", resp.StatusCode)
-		ch.log.Error(errStr)
-		http.Error(w, errStr, http.StatusBadGateway)
-		return
-	}
-	statusCode, err := strconv.Atoi(headers.Get(shared.StatusCodeHeaderName))
-	if err != nil {
-		ch.log.Error("Failed to parse response status code from agent", "error", err)
-		http.Error(w, err.Error(), http.StatusBadGateway)
-		return
-	}
-	headers.Del(shared.StatusCodeHeaderName)
-	if statusCode != http.StatusSwitchingProtocols {
-		w.WriteHeader(statusCode)
-		LogRequest(r, slog.LevelError, statusCode, errors.New("unexpected status code from k8s"))
-		if _, err := io.Copy(w, resp.Body); err != nil {
-			ch.log.Error("Upgrade copy error", "error", err)
-		}
-		return
-	}
-	headers.Add("Connection", "Upgrade")
-	w.WriteHeader(statusCode)
-	LogRequest(r, slog.LevelInfo, statusCode, nil)
-
-	// Hijack the request conn
-	rc := http.NewResponseController(w)
-	if err := rc.Flush(); err != nil {
-		ch.log.Error("Failed to flush response", "error", err)
-		return
-	}
-	reqConn, _, err := rc.Hijack()
-	if err != nil {
-		ch.log.Error("Failed to hijack connection", "error", err)
-		return
-	}
-	defer reqConn.Close()
-
-	// bidirectional data copy
-	err = shared.BidirectionalCopy(r.Context(), ch.ctx, reqConn, shared.ReadWriteCloser{
-		ReadCloser: resp.Body,
-		Writer:     pw,
-	})
-	shared.LogUpgradeRequest("hub", r, err)
 }

@@ -3,16 +3,12 @@ package agent
 import (
 	"context"
 	"crypto/tls"
-	"errors"
-	"io"
 	"kubeportal/shared"
 	"log/slog"
-	"maps"
 	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
-	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -65,6 +61,16 @@ func NewK8sProxy() (*K8sProxy, error) {
 		return nil, err
 	}
 	tlsConfig := &tls.Config{RootCAs: caPool}
+	tr1 := http.DefaultTransport.(*http.Transport).Clone()
+	tr1.TLSClientConfig = tlsConfig
+	tr2, err := http2.ConfigureTransports(tr1)
+	if err != nil {
+		return nil, err
+	}
+	tr2.StrictMaxConcurrentStreams = false
+	tr2.CountError = func(errType string) {
+		shared.LogHTTP2Error("agent-client", errType)
+	}
 	ctx, ctxCancel := context.WithCancel(context.Background())
 	kp := &K8sProxy{
 		ctx:        ctx,
@@ -79,14 +85,8 @@ func NewK8sProxy() (*K8sProxy, error) {
 	}
 	kp.rp = &httputil.ReverseProxy{
 		Transport: &shared.LoggingTripper{
-			RoundTripper: &http2.Transport{
-				TLSClientConfig:            tlsConfig,
-				StrictMaxConcurrentStreams: false,
-				CountError: func(errType string) {
-					shared.LogHTTP2Error("agent-client", errType)
-				},
-			},
-			LogRequest: LogRequest,
+			RoundTripper: tr1,
+			LogHeaders:   LogRequest,
 		},
 		Rewrite:      func(pr *httputil.ProxyRequest) {}, // done in ServeHTTP
 		ErrorHandler: shared.ProcessProxyError,
@@ -125,11 +125,14 @@ func (kp *K8sProxy) ServeConn(c net.Conn) {
 
 func (kp *K8sProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	rCtx := shared.CtxWithStartTime(r.Context())
+	rCtx = shared.CtxWithResponseLogItems(rCtx)
 	if shared.IsLongPollRequest(r) { // don't wait for watches when terminating
 		var cancel context.CancelFunc
-		rCtx, cancel = shared.CtxWithExistingCancel(rCtx, kp.ctx)
+		rCtx, cancel = context.WithCancel(rCtx)
 		defer cancel()
-		defer shared.NoAbortOnShutdown(kp.ctx)
+		stop := context.AfterFunc(kp.ctx, cancel)
+		defer stop()
+		defer shared.CatchAbortOnShutdown(kp.ctx)
 	}
 	r = r.WithContext(rCtx)
 	r.Header.Set("Authorization", "Bearer "+kp.token.Load())
@@ -137,49 +140,26 @@ func (kp *K8sProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	r.URL.Host = kp.k8sHost
 	r.Host = ""
 	if shared.IsUpgradeRequest(r) {
-		kp.serveUpgrade(w, r)
-		return
+		upgCtx, cancel := context.WithCancel(r.Context())
+		defer cancel()
+		stop := context.AfterFunc(kp.ctx, func() {
+			time.Sleep(time.Until(shared.StartTimeFromCtx(upgCtx).Add(10 * time.Second)))
+			cancel()
+		})
+		defer stop()
+		r = (&http.Request{ // don't use Clone, need an upgrade-friendly request
+			Method: r.Method,
+			URL:    r.URL,
+			Header: r.Header,
+			Body:   r.Body,
+		}).WithContext(upgCtx)
+		r.Header.Set("Connection", "Upgrade")
+		r.Header.Set("Upgrade", r.Header.Get("Kubeportal-Upgrade"))
+		r.Header.Del("Kubeportal-Upgrade")
+		w = &h2Hijacker{w, r}
 	}
+	defer shared.LogRequestFinished(r, LogRequest)
 	kp.rp.ServeHTTP(w, r)
-}
-
-func (kp *K8sProxy) serveUpgrade(w http.ResponseWriter, r *http.Request) {
-	// modify and forward the request
-	proto := r.Header.Get("Kubeportal-Upgrade")
-	r.Header.Set("Connection", "Upgrade")
-	r.Header.Set("Upgrade", proto)
-	r.Header.Del("Kubeportal-Upgrade")
-	reqBody := r.Body
-	r.Body = http.NoBody
-	resp, err := kp.upgradeTransport.RoundTrip(r)
-	if err != nil {
-		w.Header().Add(shared.StatusCodeHeaderName, strconv.Itoa(http.StatusBadGateway))
-		http.Error(w, err.Error(), http.StatusOK)
-		kp.log.Error("Failed to roundtrip upgrade request", "error", err)
-		LogRequest(r, slog.LevelError, 0, err)
-		return
-	}
-	defer resp.Body.Close()
-
-	// proxy resp back to hub
-	maps.Copy(w.Header(), resp.Header)
-	w.Header().Add(shared.StatusCodeHeaderName, strconv.Itoa(resp.StatusCode))
-	w.WriteHeader(http.StatusOK)
-	if resp.StatusCode != http.StatusSwitchingProtocols {
-		LogRequest(r, slog.LevelError, resp.StatusCode, errors.New("expected 101 response"))
-		if _, err := io.Copy(w, resp.Body); err != nil {
-			kp.log.Error("Upgrade copy error", "error", err)
-		}
-		return
-	}
-	LogRequest(r, slog.LevelInfo, resp.StatusCode, nil)
-
-	// bidirectional data copy
-	err = shared.BidirectionalCopy(r.Context(), kp.ctx, resp.Body.(io.ReadWriteCloser), shared.ReadWriteCloser{
-		ReadCloser: reqBody,
-		Writer:     &flushWriter{w},
-	})
-	shared.LogUpgradeRequest("agent", r, err)
 }
 
 func (kp *K8sProxy) watchToken() {

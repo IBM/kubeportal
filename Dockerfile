@@ -3,7 +3,7 @@ WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN go build -o /app/kubeportal
+RUN --mount=type=cache,target=/root/.cache/go-build go build -o /app/kubeportal
 
 FROM alpine:3.22
 COPY --from=builder /app/kubeportal /app/kubeportal

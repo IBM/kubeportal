@@ -26,6 +26,7 @@ type ctxKey int
 
 const (
 	ctxKeyRequestStartTime ctxKey = iota
+	ctxKeyResponseLogItems
 )
 
 var (
@@ -118,6 +119,7 @@ func (sm *SyncMap[K, V]) Delete(key K) {
 }
 
 func ProcessProxyError(w http.ResponseWriter, r *http.Request, err error) {
+	slog.Error("proxy error", "error", err, "module", "reverse-proxy")
 	http.Error(w, "reverse-proxy error: "+err.Error(), http.StatusBadGateway)
 }
 
@@ -137,18 +139,9 @@ func IsLongPollRequest(r *http.Request) bool {
 	return q.Get("watch") == "true" || q.Get("follow") == "true"
 }
 
+// Special handling for upgrade requests until golang reverse proxy supports them natively
 func IsUpgradeRequest(r *http.Request) bool {
 	return r.Header.Get("Upgrade") != "" || r.Header.Get("Kubeportal-Upgrade") != ""
-}
-
-// returns baseCtx that is canceled when existingCancelCtx is canceled
-func CtxWithExistingCancel(baseCtx, existingCancelCtx context.Context) (context.Context, context.CancelFunc) {
-	newCtx, cancel := context.WithCancel(baseCtx)
-	stop := context.AfterFunc(existingCancelCtx, cancel)
-	return newCtx, func() {
-		cancel()
-		stop()
-	}
 }
 
 func CtxWithStartTime(ctx context.Context) context.Context {
@@ -163,9 +156,9 @@ func StartTimeFromCtx(ctx context.Context) time.Time {
 // but long-poll requests like watch and logs -f we want to stop immediately to allow for a quicker shutdown.
 // When cancelling a context, the reverse proxy will panic with http.ErrAbortHandler, which the http2 server
 // turns into a RST_STREAM INTERNAL_ERROR. But this is not the correct behavior for a proxy that is restarting.
-// The correct behavior seems to be a RST_STREAM CANCEL, but this there is no way to cause the http2 server to send that.
+// The correct behavior seems to be a RST_STREAM CANCEL, but there is no way to cause the http2 server to send that.
 // The next best option seems to be to just end the stream, usually after GoAway is sent, which we do on shutdown.
-func NoAbortOnShutdown(ctx context.Context) {
+func CatchAbortOnShutdown(ctx context.Context) {
 	if ctx.Err() != nil {
 		if err := recover(); err != nil && err != http.ErrAbortHandler {
 			panic(err)
@@ -174,38 +167,19 @@ func NoAbortOnShutdown(ctx context.Context) {
 }
 
 type ReadWriteCloser struct {
-	io.ReadCloser
+	io.Reader
 	io.Writer
 }
 
-func asyncCopy(dst io.Writer, src io.Reader, errChan chan error) {
-	_, err := io.Copy(dst, src)
-	errChan <- err
-}
-
-func BidirectionalCopy(rCtx context.Context, cancelCtx context.Context, a, b io.ReadWriteCloser) error {
-	errChan := make(chan error)
-	go asyncCopy(a, b, errChan)
-	go asyncCopy(b, a, errChan)
-	select {
-	case <-rCtx.Done():
-		a.Close()
-		b.Close()
-		<-errChan
-		<-errChan
-		return nil
-	case <-cancelCtx.Done():
-		time.Sleep(time.Until(StartTimeFromCtx(rCtx).Add(10 * time.Second))) // let it run for at least 10s
-		a.Close()
-		b.Close()
-		<-errChan
-		<-errChan
-		return nil
-	case err := <-errChan:
-		a.Close()
-		b.Close()
-		return errors.Join(err, <-errChan)
+func (rwc ReadWriteCloser) Close() error {
+	var err1, err2 error
+	if c, ok := rwc.Reader.(io.Closer); ok {
+		err1 = c.Close()
 	}
+	if c, ok := rwc.Writer.(io.Closer); ok {
+		err2 = c.Close()
+	}
+	return errors.Join(err1, err2)
 }
 
 func LogUpgradeRequest(module string, r *http.Request, err error) {
@@ -225,9 +199,10 @@ func LogUpgradeRequest(module string, r *http.Request, err error) {
 	upgradeRequestDurationMetric.WithLabelValues(module).Observe(duration.Seconds())
 }
 
+type LoggerFunc func(requestFinished bool, r *http.Request, level slog.Level, statusCode int, err error)
 type LoggingTripper struct {
 	http.RoundTripper
-	LogRequest func(r *http.Request, level slog.Level, statusCode int, err error)
+	LogHeaders LoggerFunc
 }
 
 func (lt *LoggingTripper) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -241,6 +216,25 @@ func (lt *LoggingTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 		statusCode = 0
 		logLevel = slog.LevelWarn
 	}
-	lt.LogRequest(req, logLevel, statusCode, err)
+	lt.LogHeaders(false, req, logLevel, statusCode, err)
+	respItems := req.Context().Value(ctxKeyResponseLogItems).(*ResponseLogItems)
+	respItems.statusCode = statusCode
+	respItems.logLevel = logLevel
+	respItems.err = err
 	return resp, err
+}
+
+type ResponseLogItems struct {
+	logLevel   slog.Level
+	statusCode int
+	err        error
+}
+
+func CtxWithResponseLogItems(ctx context.Context) context.Context {
+	return context.WithValue(ctx, ctxKeyResponseLogItems, &ResponseLogItems{})
+}
+
+func LogRequestFinished(r *http.Request, l LoggerFunc) {
+	respItems := r.Context().Value(ctxKeyResponseLogItems).(*ResponseLogItems)
+	l(true, r, respItems.logLevel, respItems.statusCode, respItems.err)
 }

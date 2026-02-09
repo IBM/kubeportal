@@ -131,6 +131,15 @@ var (
 		},
 		reqLabels,
 	)
+	reqHeadersLatencyMetric = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Subsystem: "hub",
+			Name:      "http_request_headers_duration_seconds",
+			Help:      "HTTP request duration",
+			Buckets:   prometheus.DefBuckets,
+		},
+		reqLabels,
+	)
 	reqLatencyMetric = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Subsystem: "hub",
@@ -167,7 +176,7 @@ func DecrementReqCnt(r *http.Request) {
 	}
 }
 
-func LogRequest(r *http.Request, level slog.Level, statusCode int, err error) {
+func LogRequest(requestFinished bool, r *http.Request, level slog.Level, statusCode int, err error) {
 	ctx := r.Context()
 	rp := RequestPropsFromContext(ctx)
 	connID, agentID := "", ""
@@ -177,7 +186,13 @@ func LogRequest(r *http.Request, level slog.Level, statusCode int, err error) {
 	}
 	duration := time.Since(shared.StartTimeFromCtx(ctx))
 	strStatusCode := strconv.Itoa(statusCode)
-	slog.Log(ctx, level, "Request proxied",
+	msg := "Processed "
+	if requestFinished {
+		msg += "body"
+	} else {
+		msg += "headers"
+	}
+	slog.Log(ctx, level, msg,
 		"module", "hub-request-logger",
 		"kube_identifier", rp.KubeIdentifier,
 		"virtual_user", rp.VirtualUser,
@@ -194,8 +209,12 @@ func LogRequest(r *http.Request, level slog.Level, statusCode int, err error) {
 		"duration", duration.Milliseconds(),
 		"error", err,
 	)
-	reqCounterMetric.WithLabelValues(rp.KubeIdentifier, rp.VirtualUser, rp.ClientNS, rp.ClientSA, r.Method, strStatusCode).Inc()
-	reqLatencyMetric.WithLabelValues(rp.KubeIdentifier, rp.VirtualUser, rp.ClientNS, rp.ClientSA, r.Method, strStatusCode).Observe(duration.Seconds())
+	if requestFinished {
+		reqLatencyMetric.WithLabelValues(rp.KubeIdentifier, rp.VirtualUser, rp.ClientNS, rp.ClientSA, r.Method, strStatusCode).Observe(duration.Seconds())
+	} else {
+		reqCounterMetric.WithLabelValues(rp.KubeIdentifier, rp.VirtualUser, rp.ClientNS, rp.ClientSA, r.Method, strStatusCode).Inc()
+		reqHeadersLatencyMetric.WithLabelValues(rp.KubeIdentifier, rp.VirtualUser, rp.ClientNS, rp.ClientSA, r.Method, strStatusCode).Observe(duration.Seconds())
+	}
 }
 
 func generateTLSCert() (tls.Certificate, error) {
