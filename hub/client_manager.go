@@ -67,11 +67,13 @@ func NewClientManager(ctx context.Context) (*ClientManager, *http2.Transport, er
 		IdleTimeout: 90 * time.Second,
 		TLSConfig:   &tls.Config{Certificates: []tls.Certificate{tlsCert}},
 	}
-	http2.ConfigureServer(clientSrv, &http2.Server{
+	if err := http2.ConfigureServer(clientSrv, &http2.Server{
 		CountError: func(errType string) {
 			shared.LogHTTP2Error("hub-server", errType)
 		},
-	})
+	}); err != nil {
+		return nil, nil, err
+	}
 	return &ClientManager{
 		s:  clientSrv,
 		tr: tr,
