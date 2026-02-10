@@ -10,7 +10,7 @@ on:
 
 env:
   REGISTRY: quay.io
-  IMAGE_NAME: ${{ github.repository }}
+  IMAGE_NAME: ibm/kubeportal
 
 jobs:
   build:
