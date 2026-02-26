@@ -1,0 +1,25 @@
+# Agent service account that will impersonate users
+agent:
+  name: kubeportal-agent
+  namespace: default
+
+# Users that the agent can impersonate
+# Each user gets:
+#   - ClusterRole/ClusterRoleBinding allowing the agent to impersonate them
+#   - Any roles/clusterRoles you define for what the user can do
+#
+# Example:
+# users:
+#   alice:
+#     roles:
+#       - namespace: default
+#         rules:
+#           - apiGroups: [""]
+#             resources: ["pods"]
+#             verbs: ["get", "list", "watch"]
+#     clusterRules:
+#       - apiGroups: [""]
+#         resources: ["services"]
+#         verbs: ["get", "list", "watch"]
+users: {}
+

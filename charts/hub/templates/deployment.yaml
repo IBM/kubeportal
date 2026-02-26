@@ -1,0 +1,104 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "fullname" . }}
+  labels:
+    {{- include "labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "labels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "fullname" . }}
+      automountServiceAccountToken: true
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      volumes:
+        - name: openid-ca-certs
+          configMap:
+            name: {{ .Values.openidCertsConfigMapName }}
+            optional: true
+        {{- if .Values.clientListenerTls.secret }}
+        - name: client-listener-tls
+          secret:
+            secretName: {{ .Values.clientListenerTls.secret }}
+        {{- end }}
+      containers:
+        - name: {{ .Chart.Name }}
+          {{- with .Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - hub
+          env:
+            - name: LOG_LEVEL
+              value: {{ .Values.logLevel | quote }}
+            - name: AGENT_LISTEN_PORT
+              value: {{ default .Values.externalService.port .Values.agentListenPort | quote }}
+            - name: CLIENT_LISTEN_PORT
+              value: {{ default .Values.internalService.port .Values.clientListenPort | quote }}
+            - name: OPENID_CA_CERTS_PATH
+              value: "/etc/openid-ca-certs"
+            {{- if .Values.clientListenerTls.secret }}
+            - name: CLIENT_LISTENER_CRT
+              value: "/etc/client-listener-tls/{{ .Values.clientListenerTls.certPath }}"
+            - name: CLIENT_LISTENER_KEY
+              value: "/etc/client-listener-tls/{{ .Values.clientListenerTls.keyPath }}"
+            {{- end }}
+          ports:
+            - name: agents
+              containerPort: {{ default .Values.externalService.port .Values.agentListenPort }}
+              protocol: TCP
+            - name: clients
+              containerPort: {{ default .Values.internalService.port .Values.clientListenPort }}
+              protocol: TCP
+            - name: metrics
+              containerPort: 9090
+              protocol: TCP
+          volumeMounts:
+            - name: openid-ca-certs
+              mountPath: /etc/openid-ca-certs
+              readOnly: true
+            {{- if .Values.clientListenerTls.secret }}
+            - name: client-listener-tls
+              mountPath: /etc/client-listener-tls
+              readOnly: true
+            {{- end }}
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+

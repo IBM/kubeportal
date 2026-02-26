@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	OpenidReaderSAName   = "kubeportal-openid-reader"
+	OpenidReaderSAName   = "kubeportal-agent-openid-reader"
 	K8sHostname          = "kubernetes.default.svc.cluster.local"
 	VirtualUserPrefix    = "kubeportal:"
 	RequestIDHeaderName  = "x-request-id"

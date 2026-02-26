@@ -37,7 +37,7 @@ type hubConfig struct {
 	baseConfig        `flatten:"true"`
 	ClientListenPort  uint   `required:"true" validate:"port" usage:"port for client connections"`
 	AgentListenPort   uint   `required:"true" validate:"port" usage:"port for agent connections"`
-	OpenidCACertsPath string `default:"/tmp/certs" usage:"path to directory containing CA certs for loading jwks, can be multiple per file"`
+	OpenidCACertsPath string `required:"true" usage:"path to directory containing CA certs for loading jwks, can be multiple per file"`
 	ClientListenerCrt string `usage:"path to TLS certificate file (uses self-signed if not provided)"`
 	ClientListenerKey string `usage:"path to TLS key file (uses self-signed if not provided)"`
 }

@@ -1,0 +1,31 @@
+{{- range $namespace, $clients := .Values.clients }}
+{{- range $name, $client := $clients }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: kubeportal-{{ $name }}
+  namespace: {{ $namespace }}
+rules:
+  - apiGroups: ["kubeportal.ibm.com"]
+    resources: ["virtualUsers"]
+    resourceNames:
+      {{- toYaml $client | nindent 6 }}
+    verbs: ["use"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: kubeportal-{{ $name }}
+  namespace: {{ $namespace }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $name }}
+    namespace: {{ $namespace }}
+roleRef:
+  kind: Role
+  name: kubeportal-{{ $name }}
+  apiGroup: rbac.authorization.k8s.io
+{{- end }}
+{{- end }}
+

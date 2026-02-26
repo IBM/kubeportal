@@ -1,0 +1,37 @@
+image:
+  repository: quay.io/ibm/kubeportal
+  pullPolicy: IfNotPresent
+  tag: "latest"
+imagePullSecrets: []
+replicaCount: 2
+
+# keys in this cm are used as kube IDs (identifiers)
+openidCertsConfigMapName: kubeportal-openid-ca-certs
+logLevel: debug
+
+# Service configuration for external access (agents)
+externalService:
+  annotations: {}
+  type: LoadBalancer
+  port: 9443
+
+# Service configuration for internal access (clients)
+internalService:
+  type: ClusterIP
+  port: 8443
+
+# Optional TLS configuration for client listener. By default, a self-signed cert is used.
+# To enable, provide a secret name and the paths to the cert/key within the mounted secret
+clientListenerTls:
+  secret: ""                    # Name of the secret containing the TLS cert and key
+  certPath: "tls.crt"           # Path in the secret for the certificate
+  keyPath: "tls.key"            # Path in the secret for the private key
+
+podAnnotations: {}
+podLabels: {}
+podSecurityContext: {}
+securityContext: {}
+resources: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}

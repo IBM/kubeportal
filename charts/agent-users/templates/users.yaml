@@ -1,0 +1,75 @@
+{{- range $name, $user := .Values.users }}
+---
+# Allow agent to impersonate this user
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kubeportal-{{ $name }}
+rules:
+  - apiGroups: [""]
+    resources: ["users"]
+    verbs: ["impersonate"]
+    resourceNames: ["kubeportal:{{ $name }}"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kubeportal-{{ $name }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $.Values.agent.name }}
+    namespace: {{ $.Values.agent.namespace }}
+roleRef:
+  kind: ClusterRole
+  name: kubeportal-{{ $name }}
+  apiGroup: rbac.authorization.k8s.io
+{{- if $user.clusterRules }}
+---
+# Cluster-wide permissions for this user
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kubeportal-{{ $name }}-permissions
+rules:
+  {{- toYaml $user.clusterRules | nindent 2 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kubeportal-{{ $name }}-permissions
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: kubeportal-{{ $name }}-permissions
+subjects:
+  - kind: User
+    name: kubeportal:{{ $name }}
+    apiGroup: rbac.authorization.k8s.io
+{{- end }}
+{{- range $user.roles }}
+---
+# Namespace-scoped permissions for this user in {{ .namespace }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: kubeportal-{{ $name }}-permissions
+  namespace: {{ .namespace }}
+rules:
+  {{- toYaml .rules | nindent 2 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: kubeportal-{{ $name }}-permissions
+  namespace: {{ .namespace }}
+roleRef:
+  kind: Role
+  name: kubeportal-{{ $name }}-permissions
+  apiGroup: rbac.authorization.k8s.io
+subjects:
+  - kind: User
+    name: kubeportal:{{ $name }}
+    apiGroup: rbac.authorization.k8s.io
+{{- end }}
+{{- end }}
+

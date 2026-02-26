@@ -1,0 +1,20 @@
+image:
+  repository: quay.io/ibm/kubeportal
+  pullPolicy: IfNotPresent
+  tag: "latest"
+imagePullSecrets: []
+replicaCount: 2
+
+kubeIdentifier: "your.kube.identifier"
+hubAddress: "address.of.kubeportal.hub:port"
+insecureHub: false
+logLevel: debug
+
+podAnnotations: {}
+podLabels: {}
+podSecurityContext: {}
+securityContext: {}
+resources: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}

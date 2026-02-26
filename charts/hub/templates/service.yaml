@@ -1,0 +1,36 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "fullname" . }}-external
+  labels:
+    {{- include "labels" . | nindent 4 }}
+  {{- with .Values.externalService.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.externalService.type }}
+  selector:
+    {{- include "selectorLabels" . | nindent 4 }}
+  ports:
+    - port: {{ .Values.externalService.port }}
+      name: agents
+      targetPort: agents
+      {{- if and (eq .Values.externalService.type "NodePort") .Values.externalService.nodePort }}
+      nodePort: {{ .Values.externalService.nodePort }}
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "fullname" . }}-internal
+  labels:
+    {{- include "labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.internalService.type }}
+  selector:
+    {{- include "selectorLabels" . | nindent 4 }}
+  ports:
+    - port: {{ .Values.internalService.port }}
+      name: clients
+      targetPort: clients

@@ -1,0 +1,8 @@
+apiVersion: v2
+name: kubeportal-agent-users
+description: Manage users that can be impersonated by kubeportal agent
+type: application
+version: 0.1.0
+maintainers:
+  - name: IBM
+

@@ -1,0 +1,8 @@
+apiVersion: v2
+name: kubeportal-hub-users
+description: Manage clients that can use kubeportal virtual users
+type: application
+version: 0.1.0
+maintainers:
+  - name: IBM
+

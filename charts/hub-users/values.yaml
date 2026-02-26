@@ -1,0 +1,13 @@
+# Clients and the virtual users they can access
+# Structure: namespace -> serviceAccountName -> [virtualUsers]
+#
+# Example:
+# clients:
+#   my-namespace:
+#     my-app-svc-act:
+#       - alice
+#       - bob
+#   other-namespace:
+#     another-app-svc-act:
+#       - alice
+clients: {}

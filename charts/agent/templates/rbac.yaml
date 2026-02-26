@@ -1,0 +1,41 @@
+# allow the main service acount to create tokens for the openid-reader service account
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "fullname" . }}
+  labels:
+    {{- include "labels" . | nindent 4 }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "fullname" . }}-openid-reader
+  labels:
+    {{- include "labels" . | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "fullname" . }}-create-token
+  labels:
+    {{- include "labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["serviceaccounts/token"]
+    resourceNames: ["{{ include "fullname" . }}-openid-reader"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "fullname" . }}-create-token
+  labels:
+    {{- include "labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "fullname" . }}-create-token
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "fullname" . }}
+    namespace: {{ .Release.Namespace }}
