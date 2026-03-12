@@ -53,10 +53,11 @@ func currentNamespace() (string, error) {
 	return ns, nil
 }
 
-func netCopy(dst, src *net.TCPConn, errChan chan error) {
+type closeWriter interface{ CloseWrite() error }
+
+func netCopy(dst, src net.Conn, errChan chan error) {
 	_, err := io.Copy(dst, src)
-	dst.CloseWrite()
-	src.CloseRead()
+	dst.(closeWriter).CloseWrite()
 	errChan <- err
 }
 

@@ -101,7 +101,7 @@ func (a *Agent) Run() {
 			}
 			connID := uuid.NewString()
 			log := a.log.With("conn_id", connID)
-			tcpConn := c.(*net.TCPConn)
+			underlyingConn := c
 			c = tracedConn{Conn: c, ID: connID}
 			msg, err := messaging.WriteAndExpect(c, messaging.MsgConnInfo{
 				KubeIdentifier: a.kubeIdentifier,
@@ -124,7 +124,7 @@ func (a *Agent) Run() {
 				c.Close()
 				consecutiveRejections++
 			case messaging.MsgVerifyConn:
-				if err := a.doConnVerification(tcpConn); err != nil {
+				if err := a.doConnVerification(underlyingConn); err != nil {
 					log.Error("Error during conn verification", "error", err)
 					consecutiveRejections++
 				} else {
@@ -136,7 +136,7 @@ func (a *Agent) Run() {
 	}
 }
 
-func (a *Agent) doConnVerification(c *net.TCPConn) error {
+func (a *Agent) doConnVerification(c net.Conn) error {
 	k8sConn, err := tcpDialer.DialContext(a.ctx, "tcp", shared.K8sHostname+":443")
 	if err != nil {
 		return err
@@ -147,8 +147,9 @@ func (a *Agent) doConnVerification(c *net.TCPConn) error {
 	}
 	errChan := make(chan error)
 	c.SetDeadline(time.Now().Add(5 * time.Second))
-	go netCopy(k8sConn.(*net.TCPConn), c, errChan)
-	go netCopy(c, k8sConn.(*net.TCPConn), errChan)
+	k8sConn.SetDeadline(time.Now().Add(5 * time.Second))
+	go netCopy(k8sConn, c, errChan)
+	go netCopy(c, k8sConn, errChan)
 	return errors.Join(<-errChan, <-errChan)
 }
 
