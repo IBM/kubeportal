@@ -24,4 +24,9 @@ Authentication and authorization are enforced via native Kubernetes RBAC, using 
 - Simple Hub and Agent deployment model with horizontal scaling.
 
 ## Notes
-- Streaming operations like exec are natively supported starting from kubernetes 1.31, and can be [opted in from version 1.29](https://kubernetes.io/blog/2024/08/20/websockets-transition/)
+- Streaming operations like exec are natively supported over websocket, which became the default starting from kubernetes 1.31, and can be [opted in](https://kubernetes.io/blog/2024/08/20/websockets-transition/)  from version 1.29.
+
+## Related projects
+- kube-oidc-proxy - also uses impersonation for cross-cluster auth but relies on remote API server to be network-accessible.
+- Konnectivity - both kubeportal and Konnectivity use reverse connection initiation. Konnectivity is for API server -> node traffic while kubeportal is for pod-> remote API server traffic.
+- Teleport - similar idea but primarily for human -> API server traffic instead of workload -> API server.
