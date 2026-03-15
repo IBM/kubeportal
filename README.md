@@ -22,3 +22,6 @@ Authentication and authorization are enforced via native Kubernetes RBAC, using 
 - Works entirely with Kubernetes-native primitives.
 - Fine-grained, RBAC-based access controls on both sides.
 - Simple Hub and Agent deployment model with horizontal scaling.
+
+## Notes
+- Streaming operations like exec are natively supported starting from kubernetes 1.31, and can be [opted in from version 1.29](https://kubernetes.io/blog/2024/08/20/websockets-transition/)
