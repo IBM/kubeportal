@@ -33,9 +33,15 @@ spec:
       {{- end }}
       volumes:
         - name: openid-ca-certs
-          configMap:
-            name: {{ .Values.openidCertsConfigMapName }}
+          {{- if .Values.clusterCACerts.useSecret }}
+          secret:
+            secretName: {{ .Values.clusterCACerts.name }}
             optional: true
+          {{- else }}
+          configMap:
+            name: {{ .Values.clusterCACerts.name }}
+            optional: true
+          {{- end }}
         {{- if .Values.clientListenerTls.secret }}
         - name: client-listener-tls
           secret:

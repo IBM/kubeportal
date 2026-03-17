@@ -5,8 +5,12 @@ image:
 imagePullSecrets: []
 replicaCount: 2
 
-# keys in this cm are used as kube IDs (identifiers)
-openidCertsConfigMapName: kubeportal-openid-ca-certs
+# Keys in this ConfigMap/Secret are used as kube IDs (identifiers)
+# The values are the CA certificates that are used to validate incoming agent connections
+clusterCACerts:
+  useSecret: false # when true, use a secret, when false, use a configmap
+  name: kubeportal-openid-ca-certs  # Name of the ConfigMap or Secret containing the CA certificates
+
 logLevel: debug
 
 # Service configuration for external access (agents)
@@ -26,6 +30,25 @@ clientListenerTls:
   secret: ""                    # Name of the secret containing the TLS cert and key
   certPath: "tls.crt"           # Path in the secret for the certificate
   keyPath: "tls.key"            # Path in the secret for the private key
+
+# Optional ExternalSecret configuration to populate Cluster CA certificates
+# When enabled, creates an ExternalSecret that fetches certificates from an external secret store
+# Make sure to set clusterCACerts.useSecret to true when using this (ESO added ConfigMap support but it is not implemented in this chart yet)
+clusterCASync:
+  enabled: false
+  secretStoreRef:
+    name: ""                    # Name of the SecretStore or ClusterSecretStore
+    kind: ClusterSecretStore    # Kind: SecretStore or ClusterSecretStore
+  dataFrom: []                  # This is passed directly to the ExternalSecret spec.dataFrom field
+  # Example:
+  # dataFrom:
+  # - find:
+  #     name:
+  #       regexp: "remote-cluster-CAs-*"
+  #   rewrite:
+  #   - regexp:
+  #       source: "remote-cluster-CAs-(.*)" # assume the rest of the name is the kube identifier
+  #       target: "$1"
 
 podAnnotations: {}
 podLabels: {}

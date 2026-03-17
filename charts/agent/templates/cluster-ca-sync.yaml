@@ -1,0 +1,68 @@
+{{- if .Values.clusterCASync.enabled }}
+---
+# This provides a fake secret store to satisfy the ExternalSecret requirement to have a data field
+apiVersion: external-secrets.io/v1beta1
+kind: SecretStore
+metadata:
+  name: kubeportal-simulated-secret-store
+  labels:
+    {{- include "labels" . | nindent 4 }}
+spec:
+  provider:
+    fake:
+      data:
+      - key: "none"
+        value: "none"
+        version: "v1"
+---
+# ExternalSecret to copy CA certificate from ConfigMap to a Secret
+# This reads the cluster's root CA from the kube-root-ca.crt ConfigMap
+# and creates a Secret that can be pushed to an external secret store
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: kubeportal-cluster-root-ca
+  labels:
+    {{- include "labels" . | nindent 4 }}
+spec:
+  secretStoreRef:
+    name: kubeportal-simulated-secret-store
+    kind: SecretStore
+  target:
+    name: kubeportal-cluster-root-ca
+    template:
+      engineVersion: v2
+      templateFrom:
+      - target: Data
+        configMap:
+          name: kube-root-ca.crt
+          items:
+          - key: ca.crt
+            templateAs: Values
+  data: # below is not used, need this section to pass the admission webhook
+  - secretKey: none
+    remoteRef:
+      key: none
+      version: v1
+---
+# PushSecret to sync CA certificate to external secret store
+apiVersion: external-secrets.io/v1alpha1
+kind: PushSecret
+metadata:
+  name: kubeportal-cluster-root-ca
+  labels:
+    {{- include "labels" . | nindent 4 }}
+spec:
+  secretStoreRefs:
+    - name: {{ .Values.clusterCASync.secretStoreRef.name }}
+      kind: {{ .Values.clusterCASync.secretStoreRef.kind }}
+  selector:
+    secret:
+      name: "kubeportal-cluster-root-ca"
+  data:
+    - match:
+        secretKey: ca.crt
+        remoteRef:
+          remoteKey: "{{ .Values.clusterCASync.secretNamePrefix }}{{ .Values.kubeIdentifier }}"
+{{- end }}
+
