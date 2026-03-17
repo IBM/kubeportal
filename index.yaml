@@ -1,0 +1,51 @@
+apiVersion: v1
+entries:
+  kubeportal-agent:
+  - apiVersion: v2
+    created: "2026-03-17T22:57:09.511871177Z"
+    description: A Helm chart for deploying kubeportal agent
+    digest: 20771b51e3bcf3466390398c082f4a8fd60c3ade7a6aa35f436ac2abfb5dd3bb
+    maintainers:
+    - name: IBM
+    name: kubeportal-agent
+    type: application
+    urls:
+    - https://github.com/IBM/kubeportal/releases/download/kubeportal-agent-0.1.0/kubeportal-agent-0.1.0.tgz
+    version: 0.1.0
+  kubeportal-agent-users:
+  - apiVersion: v2
+    created: "2026-03-17T22:57:09.642470293Z"
+    description: Manage users that can be impersonated by kubeportal agent
+    digest: 336f737521fc4d6ed8791cd48b3f211bf48eb6e7b6dbb894e7efb779eb698c1a
+    maintainers:
+    - name: IBM
+    name: kubeportal-agent-users
+    type: application
+    urls:
+    - https://github.com/IBM/kubeportal/releases/download/kubeportal-agent-users-0.1.0/kubeportal-agent-users-0.1.0.tgz
+    version: 0.1.0
+  kubeportal-hub:
+  - apiVersion: v2
+    created: "2026-03-17T22:57:09.780009855Z"
+    description: A Helm chart for deploying kubeportal hub
+    digest: c4058572390954121fcab1218e5c9bd49b7dcd084eadfa5da02049a00394b64c
+    maintainers:
+    - name: IBM
+    name: kubeportal-hub
+    type: application
+    urls:
+    - https://github.com/IBM/kubeportal/releases/download/kubeportal-hub-0.1.0/kubeportal-hub-0.1.0.tgz
+    version: 0.1.0
+  kubeportal-hub-users:
+  - apiVersion: v2
+    created: "2026-03-17T22:57:09.908564871Z"
+    description: Manage clients that can use kubeportal virtual users
+    digest: 9f05ad5835e0fe18409f83bbbd39e4443200cac58b17171a0e5a45628b8079b5
+    maintainers:
+    - name: IBM
+    name: kubeportal-hub-users
+    type: application
+    urls:
+    - https://github.com/IBM/kubeportal/releases/download/kubeportal-hub-users-0.1.0/kubeportal-hub-users-0.1.0.tgz
+    version: 0.1.0
+generated: "2026-03-17T22:57:09.908593214Z"
