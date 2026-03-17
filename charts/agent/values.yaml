@@ -5,10 +5,23 @@ image:
 imagePullSecrets: []
 replicaCount: 2
 
-kubeIdentifier: "your.kube.identifier"
+kubeIdentifier: "your.kube.identifier" # this will turn into a key in the hub's clusterCAs and be used by clients to access this kube
 hubAddress: "address.of.kubeportal.hub:port"
-insecureHub: false
+insecureHub: false # when true, don't use tls when connecting to the hub
 logLevel: debug
+
+# Optional ExternalSecret configuration to sync Cluster CA certificate to the hub
+# These are not secrets per-se, but a convenient way to automatically propagate all the cluster CAs the hub through a shared secret store
+# When enabled, creates resources to copy the cluster CA certificate to an external secret store
+clusterCASync:
+  enabled: false
+  # Prefix for the secret name in the external secret store
+  # The full secret name will be: <secretNamePrefix><kubeIdentifier>
+  secretNamePrefix: "remote-cluster-CAs-"
+  # Reference to the external secret store for pushing CA certificate to
+  secretStoreRef:
+    name: "" # Name of the SecretStore or ClusterSecretStore"
+    kind: ClusterSecretStore
 
 podAnnotations: {}
 podLabels: {}
