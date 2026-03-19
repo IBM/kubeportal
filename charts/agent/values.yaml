@@ -15,6 +15,7 @@ logLevel: debug
 # When enabled, creates resources to copy the cluster CA certificate to an external secret store
 clusterCASync:
   enabled: false
+  refreshInterval: "1h" # How often to resync the certificate, format is from time.ParseDuration
   # Prefix for the secret name in the external secret store
   # The full secret name will be: <secretNamePrefix><kubeIdentifier>
   secretNamePrefix: "remote-cluster-CAs-"

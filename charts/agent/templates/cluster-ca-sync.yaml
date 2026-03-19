@@ -25,6 +25,7 @@ metadata:
   labels:
     {{- include "labels" . | nindent 4 }}
 spec:
+  refreshInterval: "{{ div (sub (now | mustDateModify .Values.clusterCASync.refreshInterval | unixEpoch ) (now | unixEpoch)) 10 | duration }}" # refreshInterval divided by 10 
   secretStoreRef:
     name: kubeportal-simulated-secret-store
     kind: SecretStore
@@ -53,6 +54,7 @@ metadata:
   labels:
     {{- include "labels" . | nindent 4 }}
 spec:
+  refreshInterval: "{{ .Values.clusterCASync.refreshInterval }}"
   secretStoreRefs:
     - name: {{ .Values.clusterCASync.secretStoreRef.name }}
       kind: {{ .Values.clusterCASync.secretStoreRef.kind }}
