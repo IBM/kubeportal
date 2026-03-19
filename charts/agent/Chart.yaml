@@ -2,7 +2,7 @@ apiVersion: v2
 name: kubeportal-agent
 description: A Helm chart for deploying kubeportal agent
 type: application
-version: 0.1.0
+version: 0.1.1
 maintainers:
   - name: IBM
 
