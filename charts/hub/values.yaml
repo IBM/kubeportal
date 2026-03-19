@@ -36,6 +36,7 @@ clientListenerTls:
 # Make sure to set clusterCACerts.useSecret to true when using this (ESO added ConfigMap support but it is not implemented in this chart yet)
 clusterCASync:
   enabled: false
+  refreshInterval: "5m"         # How often to refresh the certificates, format is from time.ParseDuration
   secretStoreRef:
     name: ""                    # Name of the SecretStore or ClusterSecretStore
     kind: ClusterSecretStore    # Kind: SecretStore or ClusterSecretStore
