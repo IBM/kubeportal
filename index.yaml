@@ -2,6 +2,17 @@ apiVersion: v1
 entries:
   kubeportal-agent:
   - apiVersion: v2
+    created: "2026-03-19T19:58:24.175548076Z"
+    description: A Helm chart for deploying kubeportal agent
+    digest: c3d391396afbd9d52210998a17a59ac9a48417d8f2418db2a95199cb5e0c0a4a
+    maintainers:
+    - name: IBM
+    name: kubeportal-agent
+    type: application
+    urls:
+    - https://github.com/IBM/kubeportal/releases/download/kubeportal-agent-0.1.1/kubeportal-agent-0.1.1.tgz
+    version: 0.1.1
+  - apiVersion: v2
     created: "2026-03-17T22:57:09.511871177Z"
     description: A Helm chart for deploying kubeportal agent
     digest: 20771b51e3bcf3466390398c082f4a8fd60c3ade7a6aa35f436ac2abfb5dd3bb
@@ -26,6 +37,17 @@ entries:
     version: 0.1.0
   kubeportal-hub:
   - apiVersion: v2
+    created: "2026-03-19T19:58:24.345015731Z"
+    description: A Helm chart for deploying kubeportal hub
+    digest: d9b9f5c435d723e469182fb605ec984170d4b6a68815c167872bf61d0e12314f
+    maintainers:
+    - name: IBM
+    name: kubeportal-hub
+    type: application
+    urls:
+    - https://github.com/IBM/kubeportal/releases/download/kubeportal-hub-0.1.1/kubeportal-hub-0.1.1.tgz
+    version: 0.1.1
+  - apiVersion: v2
     created: "2026-03-17T22:57:09.780009855Z"
     description: A Helm chart for deploying kubeportal hub
     digest: c4058572390954121fcab1218e5c9bd49b7dcd084eadfa5da02049a00394b64c
@@ -48,4 +70,4 @@ entries:
     urls:
     - https://github.com/IBM/kubeportal/releases/download/kubeportal-hub-users-0.1.0/kubeportal-hub-users-0.1.0.tgz
     version: 0.1.0
-generated: "2026-03-17T22:57:09.908593214Z"
+generated: "2026-03-19T19:58:24.345028511Z"
