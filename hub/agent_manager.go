@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 )
 
@@ -149,7 +150,7 @@ func (am *AgentManager) fetchJWKS(conn net.Conn, kube *Kube, svcActToken string)
 			},
 		},
 	}
-	body, err = getOpenidPublic(client, openidResp.Issuer+openidConfigPath)
+	body, err = getOpenidPublic(client, strings.TrimRight(openidResp.Issuer, "/")+openidConfigPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch public openid configuration: %w", err)
 	}
