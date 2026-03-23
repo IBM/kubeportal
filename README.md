@@ -11,6 +11,10 @@ kubeportal is an early prototype, still in active development.
 Expect breaking changes and incomplete features.  
 It’s currently intended for exploration and internal testing rather than production use.
 
+## Docker images
+Images are built automatically for linux on 4 architectures and can be found here: https://quay.io/repository/ibm/kubeportal?tab=tags  
+To experiment locally: `docker pull quay.io/ibm/kubeportal:latest`
+
 ## How it Works
 Agents establish outbound, TLS-secured connections to the Hub.  
 These connections are used to proxy Kubernetes API requests initiated by workloads running in the Hub cluster.  
