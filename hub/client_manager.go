@@ -192,8 +192,13 @@ func (ch *ClientHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	r.URL.Scheme = "http"
 	r.URL.Host = kubeIdentifier
 	r.URL.Path = requestedPath
-	r.Header.Set("Impersonate-User", shared.VirtualUserPrefix+virtualUser)
 	r.Header.Del("Authorization")
+	for k := range r.Header {
+		if strings.HasPrefix(k, "X-Remote") || strings.HasPrefix(k, "Impersonate") {
+			delete(r.Header, k)
+		}
+	}
+	r.Header.Set("Impersonate-User", shared.VirtualUserPrefix+virtualUser)
 	defer DecrementReqCnt(r)
 	defer shared.LogRequestFinished(r, LogRequest)
 	ch.rp.ServeHTTP(w, r)
