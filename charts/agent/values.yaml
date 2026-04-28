@@ -4,6 +4,7 @@ image:
   tag: "latest"
 imagePullSecrets: []
 replicaCount: 2
+prometheusMetricScraping: false
 
 kubeIdentifier: "your.kube.identifier" # this will turn into a key in the hub's clusterCAs and be used by clients to access this kube
 hubAddress: "address.of.kubeportal.hub:port"

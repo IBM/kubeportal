@@ -11,8 +11,10 @@ spec:
       {{- include "selectorLabels" . | nindent 6 }}
   template:
     metadata:
-      {{- with .Values.podAnnotations }}
       annotations:
+        prometheus.io/port: "9090"
+        prometheus.io/scrape: {{.Values.prometheusMetricScraping | quote }}
+      {{- with .Values.podAnnotations }}
         {{- toYaml . | nindent 8 }}
       {{- end }}
       labels:

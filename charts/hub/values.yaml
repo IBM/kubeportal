@@ -4,6 +4,7 @@ image:
   tag: "latest"
 imagePullSecrets: []
 replicaCount: 2
+prometheusMetricScraping: false
 
 # Keys in this ConfigMap/Secret are used as kube IDs (identifiers)
 # The values are the CA certificates that are used to validate incoming agent connections
