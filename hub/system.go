@@ -149,10 +149,18 @@ var (
 		},
 		reqLabels,
 	)
+	agentConnsMetric = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Subsystem: "hub",
+			Name:      "agent_connections",
+			Help:      "Number of connections per kube and agent",
+		},
+		[]string{"kube_identifier", "agent_id"},
+	)
 )
 
 func init() {
-	prometheus.MustRegister(reqCounterMetric, reqHeadersLatencyMetric, reqLatencyMetric)
+	prometheus.MustRegister(reqCounterMetric, reqHeadersLatencyMetric, reqLatencyMetric, agentConnsMetric)
 }
 
 type RequestProps struct {

@@ -81,6 +81,7 @@ func (k *Kube) AddAgentConn(conn net.Conn, agentID, connID string) error {
 		AgentID: agentID,
 		ConnID:  connID,
 	})
+	agentConnsMetric.WithLabelValues(k.id, agentID).Inc()
 	k.mu.Lock()
 	defer k.mu.Unlock()
 	connsPtr, loaded := k.conns.LoadOrStore(agentID, &[]*http2.ClientConn{cc})

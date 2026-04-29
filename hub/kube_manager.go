@@ -204,4 +204,5 @@ func (km *KubeManager) MarkDead(c *http2.ClientConn) {
 	}
 	info.Kube.RemoveAgentConn(c, info)
 	km.connLookup.Delete(c)
+	agentConnsMetric.WithLabelValues(info.Kube.id, info.AgentID).Dec()
 }
