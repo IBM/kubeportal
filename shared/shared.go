@@ -37,18 +37,10 @@ var (
 		},
 		[]string{"module", "error"},
 	)
-	upgradeRequestDurationMetric = prometheus.NewHistogramVec(
-		prometheus.HistogramOpts{
-			Name:    "http_upgrade_request_duration_seconds",
-			Help:    "HTTP upgrade request duration",
-			Buckets: prometheus.DefBuckets,
-		},
-		[]string{"module"},
-	)
 )
 
 func init() {
-	prometheus.MustRegister(http2errors, upgradeRequestDurationMetric)
+	prometheus.MustRegister(http2errors)
 }
 
 // generic atomic
@@ -180,23 +172,6 @@ func (rwc ReadWriteCloser) Close() error {
 		err2 = c.Close()
 	}
 	return errors.Join(err1, err2)
-}
-
-func LogUpgradeRequest(module string, r *http.Request, err error) {
-	ctx := r.Context()
-	duration := time.Since(StartTimeFromCtx(ctx))
-	level := slog.LevelInfo
-	if err != nil {
-		level = slog.LevelError
-	}
-	slog.Log(ctx, level, "Upgrade request proxied",
-		"module", module,
-		"path", r.URL.Path,
-		"request_id", r.Header.Get(RequestIDHeaderName),
-		"duration", duration.Milliseconds(),
-		"error", err,
-	)
-	upgradeRequestDurationMetric.WithLabelValues(module).Observe(duration.Seconds())
 }
 
 type LoggerFunc func(requestFinished bool, r *http.Request, level slog.Level, statusCode int, err error)

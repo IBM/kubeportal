@@ -152,7 +152,7 @@ var (
 )
 
 func init() {
-	prometheus.MustRegister(reqCounterMetric, reqLatencyMetric)
+	prometheus.MustRegister(reqCounterMetric, reqHeadersLatencyMetric, reqLatencyMetric)
 }
 
 type RequestProps struct {

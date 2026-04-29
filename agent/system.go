@@ -107,7 +107,7 @@ var (
 )
 
 func init() {
-	prometheus.MustRegister(reqCounterMetric, reqLatencyMetric)
+	prometheus.MustRegister(reqCounterMetric, reqHeadersLatencyMetric, reqLatencyMetric)
 }
 
 func LogRequest(requestFinished bool, r *http.Request, level slog.Level, statusCode int, err error) {
