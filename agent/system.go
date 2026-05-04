@@ -77,7 +77,7 @@ func connStateLogger(c net.Conn, connState http.ConnState) {
 
 // request logging and metrics
 var (
-	reqLabels        = []string{"virtual_user", "method", "status_code"}
+	reqLabels        = []string{"virtual_user", "method", "request_type", "status_code"}
 	reqCounterMetric = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Subsystem: "agent",
@@ -121,6 +121,7 @@ func LogRequest(requestFinished bool, r *http.Request, level slog.Level, statusC
 	} else {
 		msg += "headers"
 	}
+	reqType := shared.RequestTypeFromCtx(ctx).String()
 	slog.Log(ctx, level, msg,
 		"module", "agent-request-logger",
 		"virtual_user", virtualUser,
@@ -128,15 +129,16 @@ func LogRequest(requestFinished bool, r *http.Request, level slog.Level, statusC
 		"method", r.Method,
 		"path", r.URL.Path,
 		"request_id", r.Header.Get(shared.RequestIDHeaderName),
+		"request_type", reqType,
 		"status_code", strStatusCode,
 		"duration", duration.Milliseconds(),
 		"error", err,
 	)
 	if requestFinished {
-		reqLatencyMetric.WithLabelValues(virtualUser, r.Method, strStatusCode).Observe(duration.Seconds())
+		reqLatencyMetric.WithLabelValues(virtualUser, r.Method, reqType, strStatusCode).Observe(duration.Seconds())
 	} else {
-		reqCounterMetric.WithLabelValues(virtualUser, r.Method, strStatusCode).Inc()
-		reqHeadersLatencyMetric.WithLabelValues(virtualUser, r.Method, strStatusCode).Observe(duration.Seconds())
+		reqCounterMetric.WithLabelValues(virtualUser, r.Method, reqType, strStatusCode).Inc()
+		reqHeadersLatencyMetric.WithLabelValues(virtualUser, r.Method, reqType, strStatusCode).Observe(duration.Seconds())
 	}
 }
 

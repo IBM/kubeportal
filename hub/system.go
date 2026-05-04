@@ -122,7 +122,7 @@ func getOpenidPublic(client *http.Client, url string) ([]byte, error) {
 
 // request logging and metrics
 var (
-	reqLabels        = []string{"kube_identifier", "virtual_user", "client_ns", "client_sa", "method", "status_code"}
+	reqLabels        = []string{"kube_identifier", "virtual_user", "client_ns", "client_sa", "method", "request_type", "status_code"}
 	reqCounterMetric = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Subsystem: "hub",
@@ -200,6 +200,7 @@ func LogRequest(requestFinished bool, r *http.Request, level slog.Level, statusC
 	} else {
 		msg += "headers"
 	}
+	reqType := shared.RequestTypeFromCtx(ctx).String()
 	slog.Log(ctx, level, msg,
 		"module", "hub-request-logger",
 		"kube_identifier", rp.KubeIdentifier,
@@ -213,15 +214,16 @@ func LogRequest(requestFinished bool, r *http.Request, level slog.Level, statusC
 		"method", r.Method,
 		"path", r.URL.Path,
 		"request_id", r.Header.Get(shared.RequestIDHeaderName),
+		"request_type", reqType,
 		"status_code", strStatusCode,
 		"duration", duration.Milliseconds(),
 		"error", err,
 	)
 	if requestFinished {
-		reqLatencyMetric.WithLabelValues(rp.KubeIdentifier, rp.VirtualUser, rp.ClientNS, rp.ClientSA, r.Method, strStatusCode).Observe(duration.Seconds())
+		reqLatencyMetric.WithLabelValues(rp.KubeIdentifier, rp.VirtualUser, rp.ClientNS, rp.ClientSA, r.Method, reqType, strStatusCode).Observe(duration.Seconds())
 	} else {
-		reqCounterMetric.WithLabelValues(rp.KubeIdentifier, rp.VirtualUser, rp.ClientNS, rp.ClientSA, r.Method, strStatusCode).Inc()
-		reqHeadersLatencyMetric.WithLabelValues(rp.KubeIdentifier, rp.VirtualUser, rp.ClientNS, rp.ClientSA, r.Method, strStatusCode).Observe(duration.Seconds())
+		reqCounterMetric.WithLabelValues(rp.KubeIdentifier, rp.VirtualUser, rp.ClientNS, rp.ClientSA, r.Method, reqType, strStatusCode).Inc()
+		reqHeadersLatencyMetric.WithLabelValues(rp.KubeIdentifier, rp.VirtualUser, rp.ClientNS, rp.ClientSA, r.Method, reqType, strStatusCode).Observe(duration.Seconds())
 	}
 }
 

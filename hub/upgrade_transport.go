@@ -14,7 +14,7 @@ type upgradeTransport struct {
 }
 
 func (t *upgradeTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	if !shared.IsUpgradeRequest(req) {
+	if !shared.RequestTypeFromCtx(req.Context()).IsUpgrade() {
 		return t.rt.RoundTrip(req)
 	}
 	req = req.Clone(req.Context())

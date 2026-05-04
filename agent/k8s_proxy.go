@@ -124,9 +124,11 @@ func (kp *K8sProxy) ServeConn(c net.Conn) {
 }
 
 func (kp *K8sProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	reqType := shared.DetermineRequestType(r)
 	rCtx := shared.CtxWithStartTime(r.Context())
+	rCtx = shared.CtxWithRequestType(rCtx, reqType)
 	rCtx = shared.CtxWithResponseLogItems(rCtx)
-	if shared.IsLongPollRequest(r) { // don't wait for watches when terminating
+	if reqType.IsLongPoll() { // don't wait for watches when terminating
 		var cancel context.CancelFunc
 		rCtx, cancel = context.WithCancel(rCtx)
 		defer cancel()
@@ -139,7 +141,7 @@ func (kp *K8sProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	r.URL.Scheme = "https"
 	r.URL.Host = kp.k8sHost
 	r.Host = ""
-	if shared.IsUpgradeRequest(r) {
+	if reqType.IsUpgrade() {
 		upgCtx, cancel := context.WithCancel(r.Context())
 		defer cancel()
 		stop := context.AfterFunc(kp.ctx, func() {

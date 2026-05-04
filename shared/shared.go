@@ -26,6 +26,7 @@ type ctxKey int
 
 const (
 	ctxKeyRequestStartTime ctxKey = iota
+	ctxKeyRequestType
 	ctxKeyResponseLogItems
 )
 
@@ -38,6 +39,51 @@ var (
 		[]string{"module", "error"},
 	)
 )
+
+type RequestType int
+
+const (
+	Regular RequestType = iota
+	Watch
+	Follow
+	Upgrade
+)
+
+func (s RequestType) String() string {
+	return [...]string{"Regular", "Watch", "Follow", "Upgrade"}[s]
+}
+
+func (s RequestType) IsLongPoll() bool {
+	return s == Watch || s == Follow
+}
+
+func (s RequestType) IsUpgrade() bool {
+	return s == Upgrade
+}
+
+func DetermineRequestType(r *http.Request) RequestType {
+	q := r.URL.Query()
+	// these may end up including /proxy/ calls to pods, assume they follow similar semantics if so
+	if q.Get("watch") == "true" {
+		return Watch
+	}
+	if q.Get("follow") == "true" {
+		return Follow
+	}
+	// Special handling for upgrade requests until golang reverse proxy supports them natively
+	if r.Header.Get("Upgrade") != "" || r.Header.Get("Kubeportal-Upgrade") != "" {
+		return Upgrade
+	}
+	return Regular
+}
+
+func CtxWithRequestType(ctx context.Context, reqType RequestType) context.Context {
+	return context.WithValue(ctx, ctxKeyRequestType, reqType)
+}
+
+func RequestTypeFromCtx(ctx context.Context) RequestType {
+	return ctx.Value(ctxKeyRequestType).(RequestType)
+}
 
 func init() {
 	prometheus.MustRegister(http2errors)
@@ -123,17 +169,6 @@ func LogHTTP2Error(module, errType string) {
 	}
 	http2errors.WithLabelValues(module, errType).Inc()
 	slog.Log(context.Background(), logLevel, "http2 conn", "module", module, "error", errType)
-}
-
-func IsLongPollRequest(r *http.Request) bool {
-	q := r.URL.Query()
-	// may include /proxy/ calls to pods, assume they follow same semantics if so
-	return q.Get("watch") == "true" || q.Get("follow") == "true"
-}
-
-// Special handling for upgrade requests until golang reverse proxy supports them natively
-func IsUpgradeRequest(r *http.Request) bool {
-	return r.Header.Get("Upgrade") != "" || r.Header.Get("Kubeportal-Upgrade") != ""
 }
 
 func CtxWithStartTime(ctx context.Context) context.Context {

@@ -157,8 +157,10 @@ func (ch *ClientHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// set up the request for forwarding to agent
+	reqType := shared.DetermineRequestType(r)
 	r.Header.Set(shared.RequestIDHeaderName, uuid.NewString())
 	rCtx := shared.CtxWithStartTime(r.Context())
+	rCtx = shared.CtxWithRequestType(rCtx, reqType)
 	rCtx = shared.CtxWithResponseLogItems(rCtx)
 	rCtx = context.WithValue(rCtx, ctxKeyRequestProps, &RequestProps{
 		KubeIdentifier: kubeIdentifier,
@@ -168,7 +170,7 @@ func (ch *ClientHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ClientPod:      tokClaims.K8s.Pod.Name,
 		ClientSA:       tokClaims.K8s.ServiceAccount.Name,
 	})
-	if shared.IsLongPollRequest(r) { // don't wait for watches when terminating
+	if reqType.IsLongPoll() { // don't wait for watches when terminating
 		var cancel context.CancelFunc
 		rCtx, cancel = context.WithCancel(rCtx)
 		defer cancel()
@@ -176,7 +178,7 @@ func (ch *ClientHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		defer stop()
 		defer shared.CatchAbortOnShutdown(ch.ctx)
 	}
-	if shared.IsUpgradeRequest(r) {
+	if reqType.IsUpgrade() {
 		ch.wg.Add(1)
 		defer ch.wg.Done()
 		var cancel context.CancelFunc
