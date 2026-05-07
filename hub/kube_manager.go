@@ -93,11 +93,13 @@ func (km *KubeManager) loadKubes() error {
 	if err != nil {
 		return err
 	}
+	configuredKubes := make(map[string]bool)
 	for _, entry := range entries {
 		fileName := entry.Name()
 		if entry.IsDir() || fileName == "..data" {
 			continue
 		}
+		configuredKubes[fileName] = false
 		log := km.log.With("kube_identifier", fileName)
 		certBytes, err := os.ReadFile(filepath.Join(km.caCertsPath, fileName))
 		if err != nil {
@@ -106,6 +108,7 @@ func (km *KubeManager) loadKubes() error {
 		}
 		oldKube, loaded := km.kubes.Load(fileName)
 		if loaded && bytes.Equal(oldKube.certBytes, certBytes) {
+			configuredKubes[fileName] = oldKube.verified
 			log.Info("Not adding new kube, ca certs unchanged")
 			continue
 		}
@@ -139,6 +142,7 @@ func (km *KubeManager) loadKubes() error {
 		km.mutationLock.Unlock()
 		log.Info("Added kube")
 	}
+	configuredKubesMetric.Update(configuredKubes)
 	return nil
 }
 
@@ -169,6 +173,7 @@ func (km *KubeManager) SetJWKS(oldKube *Kube, jwksBytes []byte) error {
 	if !km.kubes.CompareAndSwap(oldKube.id, oldKube, newKube) {
 		return errors.New("kube changed while fetching jwks, didn't set jwks")
 	}
+	configuredKubesMetric.UpdateOne(oldKube.id, true)
 	return nil
 }
 
