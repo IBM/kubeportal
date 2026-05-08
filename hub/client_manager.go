@@ -201,6 +201,9 @@ func (ch *ClientHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	r.Header.Set("Impersonate-User", shared.VirtualUserPrefix+virtualUser)
+
+	reqInFlightMetric.WithLabelValues(kubeIdentifier, virtualUser, tokClaims.K8s.Namespace, tokClaims.K8s.ServiceAccount.Name, r.Method, reqType.String()).Inc()
+	defer reqInFlightMetric.WithLabelValues(kubeIdentifier, virtualUser, tokClaims.K8s.Namespace, tokClaims.K8s.ServiceAccount.Name, r.Method, reqType.String()).Dec()
 	defer DecrementReqCnt(r)
 	defer shared.LogRequestFinished(r, LogRequest)
 	ch.rp.ServeHTTP(w, r)

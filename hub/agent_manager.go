@@ -64,6 +64,7 @@ func (am *AgentManager) HandleIncomingConn(c net.Conn) {
 	}
 
 	if err := kube.ValidateToken(connInfo.SvcActToken); err != nil {
+		agentTokenValidationMetric.WithLabelValues(kube.id, connInfo.AgentID, "invalid").Inc()
 		if !errors.Is(err, ErrNoJWKS) {
 			log.Warn("Failed to validate agent token, will try fetching new jwks", "error", err)
 		}
@@ -87,6 +88,7 @@ func (am *AgentManager) HandleIncomingConn(c net.Conn) {
 		c.Close()
 		return
 	}
+	agentTokenValidationMetric.WithLabelValues(kube.id, connInfo.AgentID, "valid").Inc()
 	if !kube.ShouldAddAgentConn(connInfo.AgentID) { // each agent sends one conn request at a time
 		if err := messaging.Write(c, messaging.MsgConnRejected); err != nil {
 			log.Error("Failed to send conn rejection to agent", "error", err)

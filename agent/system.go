@@ -104,17 +104,29 @@ var (
 		},
 		reqLabels,
 	)
+	reqInFlightMetric = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Subsystem: "agent",
+			Name:      "http_requests_in_flight",
+			Help:      "HTTP requests in flight",
+		},
+		[]string{"virtual_user", "method", "request_type"},
+	)
 )
 
 func init() {
-	prometheus.MustRegister(reqCounterMetric, reqHeadersLatencyMetric, reqLatencyMetric)
+	prometheus.MustRegister(reqCounterMetric, reqHeadersLatencyMetric, reqLatencyMetric, reqInFlightMetric)
+}
+
+func VirtualUserFromRequest(r *http.Request) string {
+	return strings.TrimPrefix(r.Header.Get("Impersonate-User"), shared.VirtualUserPrefix)
 }
 
 func LogRequest(requestFinished bool, r *http.Request, level slog.Level, statusCode int, err error) {
 	ctx := r.Context()
 	duration := time.Since(shared.StartTimeFromCtx(ctx))
 	strStatusCode := strconv.Itoa(statusCode)
-	virtualUser := strings.TrimPrefix(r.Header.Get("Impersonate-User"), shared.VirtualUserPrefix)
+	virtualUser := VirtualUserFromRequest(r)
 	msg := "Processed "
 	if requestFinished {
 		msg += "body"

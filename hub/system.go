@@ -16,9 +16,11 @@ import (
 	"net"
 	"net/http"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/julien040/go-ternary"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -149,6 +151,14 @@ var (
 		},
 		reqLabels,
 	)
+	reqInFlightMetric = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Subsystem: "hub",
+			Name:      "http_requests_in_flight",
+			Help:      "HTTP requests in flight",
+		},
+		[]string{"kube_identifier", "virtual_user", "client_ns", "client_sa", "method", "request_type"},
+	)
 	agentConnsMetric = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Subsystem: "hub",
@@ -157,10 +167,53 @@ var (
 		},
 		[]string{"kube_identifier", "agent_id"},
 	)
+	agentTokenValidationMetric = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Subsystem: "hub",
+			Name:      "agent_token_validations",
+			Help:      "Agent token validation results",
+		},
+		[]string{"kube_identifier", "agent_id", "result"},
+	)
 )
 
+type KubeMetricCollector struct {
+	sync.Mutex
+	Kubes map[string]bool
+	Desc  *prometheus.Desc
+}
+
+var configuredKubesMetric = &KubeMetricCollector{
+	Desc: prometheus.NewDesc("hub_configured_kubes", "Configured Kubes", []string{"kube_identifier", "verified"}, nil),
+}
+
+func (c *KubeMetricCollector) Describe(ch chan<- *prometheus.Desc) {
+	ch <- c.Desc
+}
+
+func (c *KubeMetricCollector) Collect(ch chan<- prometheus.Metric) {
+	c.Lock()
+	defer c.Unlock()
+	for kubeID, verified := range c.Kubes {
+		ch <- prometheus.MustNewConstMetric(c.Desc, prometheus.GaugeValue, 1, kubeID, ternary.If(verified, "verified", "unverified"))
+	}
+}
+
+func (c *KubeMetricCollector) Update(kubes map[string]bool) {
+	c.Lock()
+	defer c.Unlock()
+	c.Kubes = kubes
+}
+func (c *KubeMetricCollector) UpdateOne(kubeID string, verified bool) {
+	c.Lock()
+	defer c.Unlock()
+	if _, ok := c.Kubes[kubeID]; ok {
+		c.Kubes[kubeID] = verified
+	}
+}
+
 func init() {
-	prometheus.MustRegister(reqCounterMetric, reqHeadersLatencyMetric, reqLatencyMetric, agentConnsMetric)
+	prometheus.MustRegister(reqCounterMetric, reqHeadersLatencyMetric, reqLatencyMetric, reqInFlightMetric, agentConnsMetric, agentTokenValidationMetric, configuredKubesMetric)
 }
 
 type RequestProps struct {
