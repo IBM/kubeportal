@@ -151,6 +151,14 @@ var (
 		},
 		reqLabels,
 	)
+	reqInFlightMetric = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Subsystem: "hub",
+			Name:      "http_requests_in_flight",
+			Help:      "HTTP requests in flight",
+		},
+		[]string{"kube_identifier", "virtual_user", "client_ns", "client_sa", "method", "request_type"},
+	)
 	agentConnsMetric = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Subsystem: "hub",
@@ -205,7 +213,7 @@ func (c *KubeMetricCollector) UpdateOne(kubeID string, verified bool) {
 }
 
 func init() {
-	prometheus.MustRegister(reqCounterMetric, reqHeadersLatencyMetric, reqLatencyMetric, agentConnsMetric, agentTokenValidationMetric, configuredKubesMetric)
+	prometheus.MustRegister(reqCounterMetric, reqHeadersLatencyMetric, reqLatencyMetric, reqInFlightMetric, agentConnsMetric, agentTokenValidationMetric, configuredKubesMetric)
 }
 
 type RequestProps struct {

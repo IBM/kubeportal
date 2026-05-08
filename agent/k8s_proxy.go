@@ -160,6 +160,8 @@ func (kp *K8sProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		r.Header.Del("Kubeportal-Upgrade")
 		w = &h2Hijacker{w, r}
 	}
+	reqInFlightMetric.WithLabelValues(VirtualUserFromRequest(r), r.Method, reqType.String()).Inc()
+	defer reqInFlightMetric.WithLabelValues(VirtualUserFromRequest(r), r.Method, reqType.String()).Dec()
 	defer shared.LogRequestFinished(r, LogRequest)
 	kp.rp.ServeHTTP(w, r)
 }
