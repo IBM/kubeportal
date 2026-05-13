@@ -15,9 +15,8 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
+	"github.com/maypok86/otter/v2"
 	"golang.org/x/net/http2"
-	authv1 "k8s.io/api/authorization/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 )
@@ -103,6 +102,8 @@ type ClientHandler struct {
 	tokenParser   *jwt.Parser
 	k8sAuthClient kubernetes.Interface
 	wg            *sync.WaitGroup
+	rbacCache     *otter.Cache[rbacCacheKey, byte]
+	cacheLoader   CacheLoader
 }
 
 func newClientHandler(ctx context.Context, rp *httputil.ReverseProxy, wg *sync.WaitGroup) (*ClientHandler, error) {
@@ -116,13 +117,28 @@ func newClientHandler(ctx context.Context, rp *httputil.ReverseProxy, wg *sync.W
 	if err != nil {
 		return nil, err
 	}
+
 	return &ClientHandler{
-		rp:            rp,
-		ctx:           ctx,
-		log:           slog.With("module", "hub-client-handler"),
-		tokenParser:   jwt.NewParser(jwt.WithoutClaimsValidation()),
-		k8sAuthClient: k8sClient,
-		wg:            wg,
+		rp:          rp,
+		ctx:         ctx,
+		log:         slog.With("module", "hub-client-handler"),
+		tokenParser: jwt.NewParser(jwt.WithoutClaimsValidation()),
+		wg:          wg,
+		rbacCache: otter.Must(&otter.Options[rbacCacheKey, byte]{
+			MaximumSize:       100_000,
+			InitialCapacity:   1_000,
+			RefreshCalculator: otter.RefreshWriting[rbacCacheKey, byte](1 * time.Minute),
+			ExpiryCalculator:  otter.ExpiryWriting[rbacCacheKey, byte](2 * time.Minute),
+			Logger:            CacheLogger{slog.With("module", "hub-rbac-cache")},
+		}),
+		cacheLoader: CacheLoader{
+			K8sAuthClient: k8sClient,
+			DeniedCache: otter.Must(&otter.Options[rbacCacheKey, byte]{
+				MaximumSize:      1_000,
+				InitialCapacity:  100,
+				ExpiryCalculator: otter.ExpiryWriting[rbacCacheKey, byte](1 * time.Minute),
+				Logger:           CacheLogger{slog.With("module", "hub-rbac-miss-cache")},
+			})},
 	}, nil
 }
 
@@ -215,31 +231,18 @@ func (ch *ClientHandler) checkAuth(ctx context.Context, bearerToken, kubeIdentif
 		return claims, false, fmt.Errorf("failed to parse bearer token: %w", err)
 	}
 
-	ctx = ContextWithBearerToken(ctx, bearerToken)
+	cacheKey := rbacCacheKey{Namespace: claims.K8s.Namespace, BearerToken: bearerToken, VirtualUser: virtualUser}
 
-	result, err := ch.k8sAuthClient.AuthorizationV1().SelfSubjectAccessReviews().Create(ctx, &authv1.SelfSubjectAccessReview{
-		Spec: authv1.SelfSubjectAccessReviewSpec{
-			ResourceAttributes: &authv1.ResourceAttributes{
-				Namespace: claims.K8s.Namespace,
-				Verb:      "use",
-				Group:     "kubeportal.ibm.com",
-				Version:   "v1",
-				Resource:  "virtualUsers",
-				Name:      virtualUser,
-			},
-		},
-	}, metav1.CreateOptions{})
-	if err != nil {
-		return claims, false, fmt.Errorf("failed to perform SubjectAccessReview: %w", err)
+	_, err := ch.rbacCache.Get(ctx, cacheKey, ch.cacheLoader)
+	if err != nil && err != otter.ErrNotFound {
+		return claims, false, err
 	}
-
+	allowed := err == nil
 	ch.log.With(
-		"kube_identifier", kubeIdentifier, "virtual_user", virtualUser,
+		"kube_identifier", kubeIdentifier, "virtual_user", virtualUser, "allowed", allowed,
 		"client_ns", claims.K8s.Namespace, "client_pod", claims.K8s.Pod.Name, "client_sa", claims.K8s.ServiceAccount.Name,
-		"allowed", result.Status.Allowed, "denied", result.Status.Denied, "reason", result.Status.Reason,
 	).Debug("Authorization check completed")
-
-	return claims, result.Status.Allowed, nil
+	return claims, allowed, nil
 }
 
 func (ch *ClientHandler) respondError(w http.ResponseWriter, r *http.Request, code int, msg string) {
