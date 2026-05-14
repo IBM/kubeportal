@@ -9,6 +9,7 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"io"
 	"kubeportal/shared"
 	"log/slog"
@@ -21,7 +22,11 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/julien040/go-ternary"
+	"github.com/maypok86/otter/v2"
 	"github.com/prometheus/client_golang/prometheus"
+	authv1 "k8s.io/api/authorization/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
 )
 
 type ctxKey int
@@ -30,6 +35,12 @@ const (
 	ctxKeyBearerToken ctxKey = iota
 	ctxKeyRequestProps
 )
+
+type rbacCacheKey struct {
+	Namespace   string
+	BearerToken string
+	VirtualUser string
+}
 
 type openidResponse struct {
 	Issuer  string `json:"issuer"`
@@ -175,6 +186,14 @@ var (
 		},
 		[]string{"kube_identifier", "agent_id", "result"},
 	)
+	clientAuthMetric = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Subsystem: "hub",
+			Name:      "client_auth_results",
+			Help:      "RBAC authorization checks",
+		},
+		[]string{"client_ns", "client_sa", "virtual_user", "result"},
+	)
 )
 
 type KubeMetricCollector struct {
@@ -213,7 +232,7 @@ func (c *KubeMetricCollector) UpdateOne(kubeID string, verified bool) {
 }
 
 func init() {
-	prometheus.MustRegister(reqCounterMetric, reqHeadersLatencyMetric, reqLatencyMetric, reqInFlightMetric, agentConnsMetric, agentTokenValidationMetric, configuredKubesMetric)
+	prometheus.MustRegister(reqCounterMetric, reqHeadersLatencyMetric, reqLatencyMetric, reqInFlightMetric, agentConnsMetric, agentTokenValidationMetric, configuredKubesMetric, clientAuthMetric)
 }
 
 type RequestProps struct {
@@ -305,4 +324,51 @@ func generateTLSCert() (tls.Certificate, error) {
 	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(privateKey)})
 
 	return tls.X509KeyPair(certPEM, keyPEM)
+}
+
+type CacheLogger struct {
+	Log *slog.Logger
+}
+
+func (l CacheLogger) Warn(_ context.Context, msg string, err error) {
+	l.Log.With("error", err).Warn(msg)
+}
+func (l CacheLogger) Error(_ context.Context, msg string, err error) {
+	l.Log.With("error", err).Error(msg)
+}
+
+type CacheLoader struct {
+	K8sAuthClient kubernetes.Interface
+	DeniedCache   *otter.Cache[rbacCacheKey, byte]
+}
+
+func (cl CacheLoader) Load(ctx context.Context, k rbacCacheKey) (byte, error) {
+	if _, ok := cl.DeniedCache.GetIfPresent(k); ok {
+		return 0, otter.ErrNotFound
+	}
+	return cl.Reload(ctx, k, 0)
+}
+
+func (cl CacheLoader) Reload(ctx context.Context, k rbacCacheKey, _ byte) (byte, error) {
+	ctx = ContextWithBearerToken(ctx, k.BearerToken) // auto-injected into the Authorization header
+	result, err := cl.K8sAuthClient.AuthorizationV1().SelfSubjectAccessReviews().Create(ctx, &authv1.SelfSubjectAccessReview{
+		Spec: authv1.SelfSubjectAccessReviewSpec{
+			ResourceAttributes: &authv1.ResourceAttributes{
+				Namespace: k.Namespace,
+				Verb:      "use",
+				Group:     "kubeportal.ibm.com",
+				Version:   "v1",
+				Resource:  "virtualUsers",
+				Name:      k.VirtualUser,
+			},
+		},
+	}, metav1.CreateOptions{})
+	if err != nil {
+		return 0, fmt.Errorf("failed to perform SubjectAccessReview: %w", err)
+	}
+	if !result.Status.Allowed {
+		cl.DeniedCache.Set(k, 0)
+		return 0, otter.ErrNotFound
+	}
+	return 0, nil
 }
