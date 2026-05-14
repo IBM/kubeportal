@@ -186,6 +186,14 @@ var (
 		},
 		[]string{"kube_identifier", "agent_id", "result"},
 	)
+	clientAuthMetric = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Subsystem: "hub",
+			Name:      "client_auth_results",
+			Help:      "RBAC authorization checks",
+		},
+		[]string{"client_ns", "client_sa", "virtual_user", "result"},
+	)
 )
 
 type KubeMetricCollector struct {
@@ -224,7 +232,7 @@ func (c *KubeMetricCollector) UpdateOne(kubeID string, verified bool) {
 }
 
 func init() {
-	prometheus.MustRegister(reqCounterMetric, reqHeadersLatencyMetric, reqLatencyMetric, reqInFlightMetric, agentConnsMetric, agentTokenValidationMetric, configuredKubesMetric)
+	prometheus.MustRegister(reqCounterMetric, reqHeadersLatencyMetric, reqLatencyMetric, reqInFlightMetric, agentConnsMetric, agentTokenValidationMetric, configuredKubesMetric, clientAuthMetric)
 }
 
 type RequestProps struct {

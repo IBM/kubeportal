@@ -230,10 +230,20 @@ func (ch *ClientHandler) checkAuth(ctx context.Context, bearerToken, kubeIdentif
 	if _, _, err := ch.tokenParser.ParseUnverified(bearerToken, &claims); err != nil {
 		return claims, false, fmt.Errorf("failed to parse bearer token: %w", err)
 	}
-
-	cacheKey := rbacCacheKey{Namespace: claims.K8s.Namespace, BearerToken: bearerToken, VirtualUser: virtualUser}
-
-	_, err := ch.rbacCache.Get(ctx, cacheKey, ch.cacheLoader)
+	_, err := ch.rbacCache.Get(ctx, rbacCacheKey{
+		Namespace:   claims.K8s.Namespace,
+		BearerToken: bearerToken,
+		VirtualUser: virtualUser,
+	}, ch.cacheLoader)
+	result := "allowed"
+	if err != nil {
+		if err == otter.ErrNotFound {
+			result = "denied"
+		} else {
+			result = "error"
+		}
+	}
+	clientAuthMetric.WithLabelValues(claims.K8s.Namespace, claims.K8s.ServiceAccount.Name, virtualUser, result).Inc()
 	if err != nil && err != otter.ErrNotFound {
 		return claims, false, err
 	}
