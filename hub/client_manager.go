@@ -129,7 +129,7 @@ func newClientHandler(ctx context.Context, rp *httputil.ReverseProxy, wg *sync.W
 			InitialCapacity:   1_000,
 			RefreshCalculator: otter.RefreshWriting[rbacCacheKey, byte](1 * time.Minute),
 			ExpiryCalculator:  otter.ExpiryWriting[rbacCacheKey, byte](2 * time.Minute),
-			Logger:            CacheLogger{slog.With("module", "hub-rbac-cache")},
+			Logger:            CacheLogger{slog.With("module", "hub-rbac-allowed-cache")},
 		}),
 		cacheLoader: CacheLoader{
 			K8sAuthClient: k8sClient,
@@ -137,7 +137,7 @@ func newClientHandler(ctx context.Context, rp *httputil.ReverseProxy, wg *sync.W
 				MaximumSize:      1_000,
 				InitialCapacity:  100,
 				ExpiryCalculator: otter.ExpiryWriting[rbacCacheKey, byte](1 * time.Minute),
-				Logger:           CacheLogger{slog.With("module", "hub-rbac-miss-cache")},
+				Logger:           CacheLogger{slog.With("module", "hub-rbac-denied-cache")},
 			})},
 	}, nil
 }
