@@ -6,7 +6,7 @@ COPY . .
 RUN --mount=type=cache,target=/root/.cache/go-build \
 CGO_ENABLED=1 go build -race -o /app/kubeportal
 
-FROM debian:trixie
+FROM debian:trixie-20260623
 ENV GODEBUG=http2debug=1
 COPY --from=builder /app/kubeportal /app/kubeportal
 ENTRYPOINT ["/app/kubeportal"]
