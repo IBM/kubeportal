@@ -284,7 +284,7 @@ func LogRequest(requestFinished bool, r *http.Request, level slog.Level, statusC
 		"agent_id", agentID,
 		"client_ip", r.RemoteAddr,
 		"method", r.Method,
-		"path", r.URL.Path,
+		"path", r.URL.RequestURI(),
 		"request_id", r.Header.Get(shared.RequestIDHeaderName),
 		"request_type", reqType,
 		"status_code", strStatusCode,

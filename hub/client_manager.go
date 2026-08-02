@@ -260,6 +260,6 @@ func (ch *ClientHandler) respondError(w http.ResponseWriter, r *http.Request, co
 	ch.log.With(
 		"client_ip", r.RemoteAddr,
 		"method", r.Method,
-		"path", r.URL.Path,
+		"path", r.URL.RequestURI(),
 	).Warn(fmt.Sprintf("Request error: %d %s", code, msg))
 }
