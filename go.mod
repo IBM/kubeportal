@@ -7,7 +7,7 @@ require (
 	github.com/go-playground/validator/v10 v10.30.2
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/uuid v1.6.0
-	github.com/itzg/go-flagsfiller v1.17.0
+	github.com/itzg/go-flagsfiller v1.19.0
 	github.com/julien040/go-ternary v1.0.2
 	github.com/maypok86/otter/v2 v2.3.0
 	golang.org/x/net v0.57.0
