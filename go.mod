@@ -13,7 +13,7 @@ require (
 	golang.org/x/net v0.57.0
 	k8s.io/api v0.36.3
 	k8s.io/apimachinery v0.36.3
-	k8s.io/client-go v0.36.3
+	k8s.io/client-go v11.0.0+incompatible
 )
 
 require (
